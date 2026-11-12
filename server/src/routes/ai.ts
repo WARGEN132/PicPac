@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../db/database';
+import { readSession, requireAccount } from '../session';
 
 export const aiRouter = Router();
 
@@ -186,15 +187,24 @@ function buildSpread(spreadIndex: number, photos: string[], theme: string, style
 aiRouter.post('/ai/generate-book', (req: Request, res: Response) => {
   try {
     const db = getDatabase();
+    const account = readSession(req);
     const {
       photos = [],
       theme = 'Семья',
       style = 'Минималистичный',
       format = '20×20 см',
+      pages = 12,
       coverType = 'Твёрдая фотообложка',
       customPrompt = '',
       title = 'Семейная история'
     } = req.body;
+
+    if (!Array.isArray(photos) || photos.some(photo => typeof photo !== 'string') ||
+        !Number.isInteger(pages) || pages < 2 || pages > 100 || pages % 2 !== 0 ||
+        [theme, style, format, coverType, customPrompt, title].some(value => typeof value !== 'string')) {
+      return res.status(400).json({ success: false, error: 'Некорректные параметры фотокниги' });
+    }
+    const size = /^(\d+)\s*[×xх]\s*(\d+)\s*см$/i.exec(format.trim());
 
     const samplePhotos = photos.length > 0 ? photos : [
       'https://images.unsplash.com/photo-1511895426328-dc8714191300?auto=format&fit=crop&w=800&q=80',
@@ -207,7 +217,7 @@ aiRouter.post('/ai/generate-book', (req: Request, res: Response) => {
       'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=800&q=80'
     ];
 
-    const spreadsCount = 6; // 6 spreads = 12 pages + cover
+    const spreadsCount = pages / 2;
     const spreads = [];
 
     for (let i = 0; i < spreadsCount; i++) {
@@ -231,8 +241,8 @@ aiRouter.post('/ai/generate-book', (req: Request, res: Response) => {
       },
       spreads,
       productionSettings: {
-        widthMm: 200,
-        heightMm: 200,
+        widthMm: size ? Number(size[1]) * 10 : 200,
+        heightMm: size ? Number(size[2]) * 10 : 200,
         safeZoneMm: 5,
         bleedMm: 3,
         spineMm: 10
@@ -245,7 +255,7 @@ aiRouter.post('/ai/generate-book', (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       uuidv4(),
-      'usr-test-customer-001',
+      account && account.role !== 'guest' ? account.id : null,
       new Date().toISOString(),
       'ai:generate_book',
       'project',
@@ -271,7 +281,7 @@ aiRouter.post('/ai/generate-book', (req: Request, res: Response) => {
 });
 
 // POST /api/ai/edit-command — Natural Language AI Assistant in Editor (Section 9.4)
-aiRouter.post('/ai/edit-command', (req: Request, res: Response) => {
+aiRouter.post('/ai/edit-command', requireAccount, (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const { document, currentSpreadIndex = 0, command = '' } = req.body;
@@ -364,7 +374,7 @@ aiRouter.post('/ai/edit-command', (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       uuidv4(),
-      'usr-test-customer-001',
+      res.locals.account.id,
       new Date().toISOString(),
       'ai:edit_command',
       'project',

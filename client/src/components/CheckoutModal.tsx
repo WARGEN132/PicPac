@@ -1,29 +1,30 @@
-import React, { useState } from 'react';
-import { CartItem, Order } from '../types';
+import React, { useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { deliveryOptions, toCents, type DeliveryMethod } from '../../../shared/checkout';
+import { CartItem, CreatedOrder, AuthUser } from '../types';
 import { createOrder } from '../services/api';
 import {
   X,
   CheckCircle2,
   Truck,
-  CreditCard,
   User,
-  MapPin,
   ChevronRight,
   ChevronLeft,
-  ShieldCheck,
   Receipt
 } from 'lucide-react';
 
 interface CheckoutModalProps {
+  user: AuthUser;
   items: CartItem[];
   subtotal: number;
   discountAmount: number;
   promoCode: string;
-  onClose: () => void;
-  onOrderCompleted: (order: any) => void;
+  onClose: (completed: boolean) => void;
+  onOrderCompleted: () => void;
 }
 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
+  user,
   items,
   subtotal,
   discountAmount,
@@ -33,65 +34,64 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
   const [step, setStep] = useState<number>(1); // 1 = Contacts & Delivery, 2 = Payment & Confirm
 
-  // Contact info
-  const [firstName, setFirstName] = useState<string>('Иван');
-  const [lastName, setLastName] = useState<string>('Радкевич');
-  const [phone, setPhone] = useState<string>('+375 29 123-45-67');
-  const [email, setEmail] = useState<string>('customer@test.by');
-
-  // Delivery options (Exact brandbook tariffs & options)
-  const deliveryOptions = [
-    { id: 'pickup', name: 'Самовывоз из лаборатории (Минск / Великий камень)', price: 0.0, days: 'Сегодня / завтра' },
-    { id: 'europost', name: 'Европочта (до отделения по всей РБ)', price: 5.90, days: '2-3 дня' },
-    { id: 'belpost', name: 'Белпочта (почтовое отделение с трекингом)', price: 6.90, days: '2-4 дня' },
-    { id: 'courier', name: 'Курьерская доставка до двери (Минск)', price: 9.90, days: '1-2 дня' }
-  ];
-  const [deliveryMethod, setDeliveryMethod] = useState<string>('europost');
-  const [deliveryAddress, setDeliveryAddress] = useState<string>('г. Минск, пр-т Дзержинского, 104 (Отделение Европочты № 422)');
-  const [paymentMethod, setPaymentMethod] = useState<'erip' | 'card'>('erip');
-  const [comment, setComment] = useState<string>('Проверить цветопробу перед ламинированием');
+  const [givenName, ...familyName] = user.name.trim().split(/\s+/);
+  const [firstName, setFirstName] = useState(givenName);
+  const [lastName, setLastName] = useState(familyName.join(' '));
+  const [phone, setPhone] = useState(user.phone ?? '');
+  const [email, setEmail] = useState(user.email);
+  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('europost');
+  const [deliveryAddress, setDeliveryAddress] = useState(user.address ?? '');
+  const [comment, setComment] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [completedOrder, setCompletedOrder] = useState<any | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<CreatedOrder | null>(null);
+  const [error, setError] = useState('');
+  const pendingRequest = useRef<{ payload: string; key: string } | null>(null);
+  const canContinue = firstName.trim() && phone.trim() &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) &&
+    (deliveryMethod === 'pickup_minsk' || deliveryAddress.trim());
 
   const selectedDelivery = deliveryOptions.find(d => d.id === deliveryMethod) || deliveryOptions[0];
   const deliveryCost = selectedDelivery.price;
-  const finalTotal = Math.max(0, Math.round((subtotal - discountAmount + deliveryCost) * 100) / 100);
+  const finalTotal = (toCents(subtotal) - toCents(discountAmount) + toCents(deliveryCost)) / 100;
 
   const handleSubmitOrder = async () => {
     setIsSubmitting(true);
-    const idempotencyKey = `idemp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setError('');
 
     try {
       const orderPayload = {
-        userId: 'usr-test-customer-001',
         contactName: `${firstName} ${lastName}`.trim(),
         contactPhone: phone,
         contactEmail: email,
         deliveryMethod,
-        deliveryAddress,
+        deliveryAddress: deliveryMethod === 'pickup_minsk' ? '' : deliveryAddress.trim(),
         items: items.map(item => ({
           productId: item.productId,
           variantId: item.variantId,
           projectId: item.projectId,
           quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          totalPrice: item.totalPrice,
           snapshot: {
             title: item.productName,
             variant: item.variantName,
-            details: item.details
+            details: item.details,
+            document: item.document,
+            photos: item.photos
           }
         })),
         promoCode,
         comment
       };
 
-      const result = await createOrder(orderPayload, idempotencyKey);
+      const payload = JSON.stringify(orderPayload);
+      if (pendingRequest.current?.payload !== payload) {
+        pendingRequest.current = { payload, key: uuidv4() };
+      }
+      const result = await createOrder(orderPayload, pendingRequest.current.key);
       setCompletedOrder(result);
-      onOrderCompleted(result);
+      onOrderCompleted();
     } catch (err: any) {
-      alert('Ошибка при оформлении заказа: ' + err.message);
+      setError(err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -108,13 +108,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               {completedOrder ? 'Заказ успешно принят' : 'Оформление заказа'}
             </h2>
             <p className="text-[11px] text-[#7A8C88]">
-              {completedOrder ? 'Передан в печатный цех ООО «Фотопринт»' : `Шаг ${step} из 2 • Доставка и оплата в BYN`}
+              {completedOrder ? 'Тестовый заказ сохранён' : `Шаг ${step} из 2 • Доставка и подтверждение`}
             </p>
           </div>
           {!completedOrder && (
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose(false)}
+              aria-label="Закрыть оформление"
+              disabled={isSubmitting}
               className="p-1.5 rounded-full text-[#7A8C88] hover:bg-[#F6EFE6] hover:text-[#364C49] cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -159,13 +161,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
                 <div className="flex justify-between pt-1 font-bold text-sm">
                   <span className="text-[#364C49]">Итого к оплате:</span>
-                  <span className="text-[#DD5757] font-extrabold">{finalTotal.toFixed(2)} BYN</span>
+                  <span className="text-[#DD5757] font-extrabold">{completedOrder.totalAmount.toFixed(2)} BYN</span>
                 </div>
               </div>
 
-              <p className="text-xs text-[#7C807F] max-w-xs leading-relaxed">
-                Вы можете отслеживать этапы производства заказа в разделе «Профиль» → «История заказов».
-              </p>
+              <p className="text-xs text-[#7C807F]">Статус заказа доступен в профиле.</p>
             </div>
           ) : step === 1 ? (
             /* STEP 1: CONTACTS & DELIVERY */
@@ -200,7 +200,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <div>
                     <label className="text-[11px] text-[#7C807F] block mb-0.5">Телефон РБ</label>
                     <input
-                      type="text"
+                      type="tel"
                       value={phone}
                       onChange={e => setPhone(e.target.value)}
                       className="w-full bg-[#F6EFE6]/40 border border-[#BCBFB7]/60 rounded-xl px-2.5 py-1.5 text-xs text-[#364C49] font-bold"
@@ -249,57 +249,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   })}
                 </div>
 
-                <div>
-                  <label className="text-[11px] text-[#7C807F] block mb-1">
-                    Адрес доставки или номер отделения:
+                {deliveryMethod !== 'pickup_minsk' && (
+                  <label className="text-[11px] text-[#7C807F] block">
+                    {deliveryMethod === 'courier' ? 'Адрес доставки' : 'Адрес или номер отделения'}
+                    <textarea
+                      rows={2}
+                      value={deliveryAddress}
+                      onChange={e => setDeliveryAddress(e.target.value)}
+                      className="mt-1 w-full bg-[#F6EFE6]/40 border border-[#BCBFB7]/60 rounded-xl p-2 text-xs text-[#364C49] font-medium"
+                    />
                   </label>
-                  <textarea
-                    rows={2}
-                    value={deliveryAddress}
-                    onChange={e => setDeliveryAddress(e.target.value)}
-                    className="w-full bg-[#F6EFE6]/40 border border-[#BCBFB7]/60 rounded-xl p-2 text-xs text-[#364C49] font-medium"
-                  />
-                </div>
+                )}
               </div>
             </div>
           ) : (
             /* STEP 2: PAYMENT & CONFIRMATION */
             <div className="space-y-4 animate-fadeIn">
-              {/* Payment Methods */}
-              <div className="bg-white p-3.5 rounded-2xl border border-[#BCBFB7]/50 space-y-2.5">
-                <span className="text-xs font-bold text-[#364C49] uppercase tracking-wider block">
-                  3. Способ оплаты:
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('erip')}
-                    className={`p-3 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer ${
-                      paymentMethod === 'erip'
-                        ? 'bg-[#F6EFE6] border-[#DD5757] text-[#364C49]'
-                        : 'bg-white border-[#BCBFB7]/50 text-[#7C807F]'
-                    }`}
-                  >
-                    <CreditCard className="w-5 h-5 text-[#DD5757] mb-1" />
-                    <span>ЕРИП (Беларусь)</span>
-                    <span className="text-[10px] text-[#7C807F] block font-normal mt-0.5">Без комиссии</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('card')}
-                    className={`p-3 rounded-xl border text-left text-xs font-bold transition-all cursor-pointer ${
-                      paymentMethod === 'card'
-                        ? 'bg-[#F6EFE6] border-[#DD5757] text-[#364C49]'
-                        : 'bg-white border-[#BCBFB7]/50 text-[#7C807F]'
-                    }`}
-                  >
-                    <Receipt className="w-5 h-5 text-[#364C49] mb-1" />
-                    <span>Банковская карта</span>
-                    <span className="text-[10px] text-[#7C807F] block font-normal mt-0.5">Белкарт / Visa / MC</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Order summary breakdown */}
               <div className="bg-white p-3.5 rounded-2xl border border-[#BCBFB7]/50 space-y-2 text-xs">
                 <span className="text-xs font-bold text-[#364C49] uppercase tracking-wider block border-b border-[#BCBFB7]/30 pb-1.5">
@@ -325,13 +290,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               </div>
 
-              {/* Security info */}
-              <div className="bg-[#F6EFE6] border border-[#BCBFB7]/40 rounded-xl p-3 flex items-center space-x-2.5 text-xs text-[#364C49]">
-                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span className="text-[11px] leading-relaxed">
-                  Безопасный расчёт по протоколу 3D-Secure 2.0 и ЕРИП. Все персональные данные и фото защищены шифрованием TLS 1.3 / AES-256 (Закон РБ № 99-З).
-                </span>
-              </div>
+              <p className="rounded-xl bg-[#F6EFE6] p-3 text-xs text-[#364C49]">
+                Это тестовый заказ. Оплата и отправка отключены.
+              </p>
+              {error && <p role="alert" className="px-1 text-xs font-bold text-red-700">{error}</p>}
             </div>
           )}
         </div>
@@ -341,7 +303,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {completedOrder ? (
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose(true)}
               className="w-full py-3 rounded-xl bg-[#364C49] text-white font-bold text-xs cursor-pointer"
             >
               Перейти к моим заказам
@@ -357,9 +319,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <button
                 type="button"
                 onClick={() => setStep(2)}
-                className="px-6 py-2.5 rounded-xl bg-[#364C49] text-white text-xs font-bold flex items-center space-x-1 cursor-pointer"
+                disabled={!canContinue}
+                className="disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-xl bg-[#364C49] text-white text-xs font-bold flex items-center space-x-1 cursor-pointer"
               >
-                <span>К оплате</span>
+                <span>Проверить заказ</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
             </>
@@ -368,6 +331,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <button
                 type="button"
                 onClick={() => setStep(1)}
+                disabled={isSubmitting}
                 className="px-4 py-2.5 rounded-xl border border-[#BCBFB7]/60 text-xs font-bold text-[#364C49] hover:bg-[#F6EFE6] cursor-pointer flex items-center space-x-1"
               >
                 <ChevronLeft className="w-4 h-4" />

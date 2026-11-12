@@ -13,10 +13,12 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { generateBookAI } from '../services/api';
-import { PhotobookDocument } from '../types';
+import { readPhoto } from '../services/photos';
+import { PhotobookDocument, Product } from '../types';
 
 interface HomePhotoCoverStudioProps {
-  onBookReady: (doc: PhotobookDocument) => void;
+  product?: Product;
+  onBookReady: (doc: PhotobookDocument, productId: string, variantId: string) => void;
   onOpenPrints: () => void;
   onOpenCatalog: () => void;
 }
@@ -52,19 +54,8 @@ const COVER_COLORS = [
   { id: 'navy', name: 'Глубокий синий', hex: '#2A3B4C', textColor: '#FFFFFF' }
 ];
 
-const COVER_MATERIALS = [
-  { id: 'soft_touch', label: 'Твёрдая Soft-Touch', note: 'Матовый бархатистый ламинат' },
-  { id: 'linen_fabric', label: 'Тканевый лён', note: 'Естественная текстура' },
-  { id: 'leatherette', label: 'Премиум экокожа', note: 'Глубокое тиснение' }
-];
-
-const BOOK_FORMATS = [
-  { id: '20x20', label: '20×20 см', note: 'Квадратная' },
-  { id: '20x28', label: '20×28 см', note: 'Вертикальная' },
-  { id: '30x30', label: '30×30 см', note: 'Гранд-формат' }
-];
-
 export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
+  product,
   onBookReady,
   onOpenPrints,
   onOpenCatalog
@@ -78,8 +69,8 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
   // Cover states
   const [bookTitle, setBookTitle] = useState<string>('Наш счастливый отпуск');
   const [selectedColor, setSelectedColor] = useState(COVER_COLORS[0]);
-  const [selectedMaterial, setSelectedMaterial] = useState(COVER_MATERIALS[0].id);
-  const [selectedFormat, setSelectedFormat] = useState(BOOK_FORMATS[0].id);
+  const [variantId, setVariantId] = useState('');
+  const selectedVariant = product?.variants.find(variant => variant.id === variantId) ?? product?.variants[0];
 
   // Generation status
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -98,21 +89,20 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
     setIsAiEnhanced(prev => !prev);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setSelectedPhoto(event.target.result as string);
-          setRotation(0);
-        }
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setSelectedPhoto(await readPhoto(file));
+      setRotation(0);
+    } catch (error) {
+      alert((error as Error).message);
     }
   };
 
   const handleGenerateBook = async () => {
+    if (!product || !selectedVariant) return;
     try {
       setIsGenerating(true);
       // Generate using real server endpoint
@@ -129,8 +119,9 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
         photos: photosList,
         theme: 'Отпуск и путешествия',
         style: 'modern',
-        format: selectedFormat,
-        coverType: COVER_MATERIALS.find(m => m.id === selectedMaterial)?.label || 'Твёрдая фотообложка',
+        format: selectedVariant.attributes.size ?? selectedVariant.name,
+        coverType: selectedVariant.attributes.cover,
+        pages: selectedVariant.attributes.pages,
         title: bookTitle
       });
 
@@ -139,7 +130,7 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
       doc.cover.backgroundColor = selectedColor.hex;
       doc.title = bookTitle;
 
-      onBookReady(doc);
+      onBookReady(doc, product.id, selectedVariant.id);
     } catch (err: any) {
       alert('Ошибка при создании фотокниги: ' + err.message);
     } finally {
@@ -209,7 +200,7 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
           {isAiEnhanced && (
             <div className="absolute top-3 left-3 bg-[#364C49]/95 text-white backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1.5 shadow-sm">
               <Sparkles className="w-3.5 h-3.5 text-[#DD5757]" />
-              <span>Цвет и резкость улучшены</span>
+              <span>Предпросмотр с фильтром</span>
             </div>
           )}
         </div>
@@ -250,7 +241,7 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
             title="Автоматическая коррекция цвета и резкости"
           >
             <Sparkles className={`w-4 h-4 ${isAiEnhanced ? 'text-white' : 'text-[#DD5757]'}`} />
-            <span>{isAiEnhanced ? 'Улучшено' : 'Улучшить'}</span>
+            <span>{isAiEnhanced ? 'Фильтр включён' : 'Фильтр'}</span>
           </button>
         </div>
 
@@ -350,69 +341,35 @@ export const HomePhotoCoverStudio: React.FC<HomePhotoCoverStudioProps> = ({
           </div>
         </div>
 
-        {/* Cover Material Chips */}
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-bold text-[#7C807F]">
-            Материал обложки
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {COVER_MATERIALS.map(mat => (
-              <button
-                key={mat.id}
-                type="button"
-                onClick={() => setSelectedMaterial(mat.id)}
-                className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
-                  selectedMaterial === mat.id
-                    ? 'border-[#364C49] bg-[#364C49] text-white shadow-xs'
-                    : 'border-[#BCBFB7]/50 bg-[#F6EFE6]/40 text-[#364C49] hover:bg-[#F6EFE6]'
-                }`}
-              >
-                <span className="text-[11px] font-bold block leading-tight">
-                  {mat.label}
-                </span>
-                <span className={`text-[9px] block mt-0.5 ${
-                  selectedMaterial === mat.id ? 'text-white/80' : 'text-[#7C807F]'
-                }`}>
-                  {mat.note}
-                </span>
-              </button>
-            ))}
+        {product && (
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-bold text-[#7C807F]">Комплектация {product.name.split(' ')[0]}</span>
+            <div className="grid gap-2">
+              {product.variants.map(variant => (
+                <button
+                  key={variant.id}
+                  type="button"
+                  aria-pressed={selectedVariant?.id === variant.id}
+                  onClick={() => setVariantId(variant.id)}
+                  className={`rounded-xl border p-2.5 text-left text-xs flex items-center justify-between gap-2
+                    ${selectedVariant?.id === variant.id ? 'bg-[#364C49] border-[#364C49] text-white' : 'bg-white border-[#BCBFB7]/60 text-[#364C49]'}`}
+                >
+                  <span>
+                    <strong className="block">{variant.attributes.size} · {variant.attributes.pages} стр.</strong>
+                    {variant.attributes.cover}
+                  </span>
+                  <strong className="shrink-0">{variant.totalPrice.toFixed(2)} BYN</strong>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-
-        {/* Format Selector */}
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-bold text-[#7C807F]">
-            Формат фотокниги
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {BOOK_FORMATS.map(fmt => (
-              <button
-                key={fmt.id}
-                type="button"
-                onClick={() => setSelectedFormat(fmt.id)}
-                className={`py-2 px-2.5 rounded-xl border text-center transition-all cursor-pointer ${
-                  selectedFormat === fmt.id
-                    ? 'border-[#DD5757] bg-[#DD5757] text-white font-black shadow-xs'
-                    : 'border-[#BCBFB7]/50 bg-white text-[#364C49] font-bold hover:bg-[#F6EFE6]'
-                }`}
-              >
-                <span className="text-xs block">{fmt.label}</span>
-                <span className={`text-[9px] block ${
-                  selectedFormat === fmt.id ? 'text-white/80' : 'text-[#7C807F]'
-                }`}>
-                  {fmt.note}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* BIG CTA BUTTON */}
         <button
           type="button"
           onClick={handleGenerateBook}
-          disabled={isGenerating}
+          disabled={isGenerating || !selectedVariant}
           className="w-full py-4 rounded-2xl bg-[#DD5757] hover:bg-[#c94b4b] text-white font-black text-sm flex items-center justify-center space-x-2 shadow-lg shadow-[#DD5757]/25 cursor-pointer transition-all active:scale-[0.98] disabled:opacity-70"
         >
           {isGenerating ? (

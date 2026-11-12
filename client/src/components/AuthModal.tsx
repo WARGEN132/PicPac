@@ -1,345 +1,163 @@
-import React, { useState } from 'react';
-import { AuthUser } from '../types';
-import { loginUser, registerUser, loginAnonymous } from '../services/api';
-import {
-  X,
-  User,
-  ShieldCheck,
-  Lock,
-  Mail,
-  Phone,
-  ArrowRight,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-  Eye,
-  EyeOff
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowRight, Camera, Eye, EyeOff, X } from 'lucide-react';
+import { loginAnonymous, loginUser, registerUser } from '../services/api';
+import type { AuthUser } from '../types';
 
 interface AuthModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   onAuthSuccess: (user: AuthUser) => void;
-  currentUser?: AuthUser | null;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({
-  isOpen,
-  onClose,
-  onAuthSuccess,
-  currentUser
-}) => {
+const inputClass = 'w-full rounded-xl border border-[#EDE1D5] bg-[#F6EFE6]/50 px-3 py-2.5 text-sm text-[#364C49] focus:border-[#DD5757] focus:outline-none';
+
+export function AuthModal({ onClose, onAuthSuccess }: AuthModalProps) {
+  const dialog = useRef<HTMLDialogElement>(null);
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState<string>('customer@test.by');
-  const [password, setPassword] = useState<string>('Customer123!');
-  const [name, setName] = useState<string>('Иван Тестович Радкевич');
-  const [phone, setPhone] = useState<string>('+375 29 123-45-67');
-  const [address, setAddress] = useState<string>('г. Минск, пр-т Победителей, 10, кв. 42');
-  const [role, setRole] = useState<'customer' | 'operator'>('customer');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [pending, setPending] = useState<'account' | 'guest' | null>(null);
+  const [error, setError] = useState('');
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
 
-  if (!isOpen) return null;
-
-  const handleQuickLogin = (demoRole: 'customer' | 'operator') => {
-    setErrorMsg(null);
-    if (demoRole === 'customer') {
-      setEmail('customer@test.by');
-      setPassword('Customer123!');
-      setRole('customer');
-    } else {
-      setEmail('operator@test.by');
-      setPassword('Operator123!');
-      setRole('operator');
+  const authorize = async (kind: 'account' | 'guest', request: () => Promise<AuthUser>) => {
+    setPending(kind);
+    setError('');
+    try {
+      onAuthSuccess(await request());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось войти. Попробуйте ещё раз.');
+    } finally {
+      setPending(null);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setErrorMsg(null);
-
-    try {
-      if (mode === 'login') {
-        const user = await loginUser(email, password);
-        onAuthSuccess(user);
-        onClose();
-      } else {
-        const user = await registerUser({
-          email,
-          password,
-          name,
-          phone,
-          address,
-          role
-        });
-        onAuthSuccess(user);
-        onClose();
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка авторизации');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAnonymous = async () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    try {
-      const guest = await loginAnonymous();
-      onAuthSuccess(guest);
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка гостевого входа');
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const email = String(fields.get('email'));
+    const password = String(fields.get('password'));
+    void authorize('account', () => mode === 'login'
+      ? loginUser(email, password)
+      : registerUser({
+        email,
+        password,
+        name: String(fields.get('name')),
+        phone: String(fields.get('phone'))
+      }));
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#364C49]/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="w-full max-w-md bg-white rounded-[32px] overflow-hidden shadow-2xl border border-[#EDE1D5] flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="bg-[#F6EFE6] px-5 py-4 border-b border-[#EDE1D5] flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-[#DD5757] text-white flex items-center justify-center shadow-xs">
-              <User className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-extrabold text-[#364C49]">
-                {mode === 'login' ? 'Вход в picPac' : 'Регистрация профиля'}
-              </h2>
-              <p className="text-[11px] text-[#7A8C88]">
-                Единая база данных клиентов и операторов цеха
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full text-[#7A8C88] hover:bg-white hover:text-[#364C49] cursor-pointer"
-          >
-            <X className="w-5 h-5" />
+    <dialog
+      ref={dialog}
+      aria-labelledby="auth-title"
+      onCancel={event => {
+        event.preventDefault();
+        if (!pending) onClose?.();
+      }}
+      className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[calc(100dvh_-_2rem)] overflow-y-auto rounded-[28px] border border-[#EDE1D5] bg-white p-0 text-[#364C49] shadow-2xl backdrop:bg-[#243b37]/70"
+    >
+      <div className="flex items-start gap-3 bg-[#F6EFE6] px-5 py-5">
+        <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-[#DD5757] text-white">
+          <Camera className="size-5" aria-hidden="true" />
+        </div>
+        <div className="flex-1">
+          <h1 id="auth-title" className="text-lg font-extrabold">
+            {mode === 'login' ? 'Вход в PicPac' : 'Создать аккаунт'}
+          </h1>
+          <p className="mt-0.5 text-xs text-[#596c67]">Фотокниги, макеты и заказы в одном месте.</p>
+        </div>
+        {onClose && (
+          <button type="button" aria-label="Закрыть окно входа" disabled={!!pending} onClick={onClose} className="rounded-full p-1 hover:bg-white">
+            <X className="size-5" />
           </button>
-        </div>
-
-        {/* Scrollable Body */}
-        <div className="overflow-y-auto p-5 space-y-4">
-          {/* Quick Demo Switcher for Hackathon Jury */}
-          <div className="bg-[#F6EFE6] rounded-2xl p-3 border border-[#EDE1D5] space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-bold text-[#364C49]">
-              <span className="flex items-center space-x-1">
-                <Sparkles className="w-3.5 h-3.5 text-[#DD5757]" />
-                <span>Быстрый вход для проверки жюри:</span>
-              </span>
-              <span className="text-[10px] text-[#7A8C88] bg-white px-2 py-0.5 rounded-full border border-[#EDE1D5]">
-                SQLite DB
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  handleQuickLogin('customer');
-                }}
-                className="p-2.5 rounded-xl bg-white border border-[#EDE1D5] hover:border-[#364C49] text-left cursor-pointer transition-all shadow-xs"
-              >
-                <div className="flex items-center space-x-1.5 font-bold text-[#364C49]">
-                  <User className="w-3.5 h-3.5 text-[#DD5757]" />
-                  <span>Клиент</span>
-                </div>
-                <span className="text-[10px] text-[#7A8C88] block mt-0.5 leading-tight">
-                  Иван Радкевич • Заказы и доставка
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  handleQuickLogin('operator');
-                }}
-                className="p-2.5 rounded-xl bg-white border border-[#EDE1D5] hover:border-[#364C49] text-left cursor-pointer transition-all shadow-xs"
-              >
-                <div className="flex items-center space-x-1.5 font-bold text-[#364C49]">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#7AA45A]" />
-                  <span>Оператор</span>
-                </div>
-                <span className="text-[10px] text-[#7A8C88] block mt-0.5 leading-tight">
-                  Анна • Лаборатория в Великом камне
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {/* Mode Tabs */}
-          <div className="flex bg-[#F6EFE6] p-1 rounded-2xl border border-[#EDE1D5]">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('login');
-                setErrorMsg(null);
-              }}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                mode === 'login'
-                  ? 'bg-white text-[#364C49] shadow-xs'
-                  : 'text-[#7A8C88] hover:text-[#364C49]'
-              }`}
-            >
-              Вход по паролю
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('register');
-                setErrorMsg(null);
-              }}
-              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                mode === 'register'
-                  ? 'bg-white text-[#364C49] shadow-xs'
-                  : 'text-[#7A8C88] hover:text-[#364C49]'
-              }`}
-            >
-              Регистрация в БД
-            </button>
-          </div>
-
-          {/* Error Message Alert */}
-          {errorMsg && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-start space-x-2 text-xs text-red-700">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-            {mode === 'register' && (
-              <>
-                <div>
-                  <label className="text-[11px] font-bold text-[#364C49] block mb-1">
-                    ФИО или Имя
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="Например: Дарья Васильева"
-                    className="w-full bg-[#F6EFE6]/50 border border-[#EDE1D5] rounded-xl px-3 py-2 text-xs text-[#364C49] font-medium focus:outline-none focus:border-[#DD5757]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] font-bold text-[#364C49] block mb-1">
-                      Телефон РБ
-                    </label>
-                    <input
-                      type="text"
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      placeholder="+375 29 000-00-00"
-                      className="w-full bg-[#F6EFE6]/50 border border-[#EDE1D5] rounded-xl px-3 py-2 text-xs text-[#364C49] font-medium focus:outline-none focus:border-[#DD5757]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-[#364C49] block mb-1">
-                      Роль в системе
-                    </label>
-                    <select
-                      value={role}
-                      onChange={e => setRole(e.target.value as any)}
-                      className="w-full bg-[#F6EFE6]/50 border border-[#EDE1D5] rounded-xl px-2 py-2 text-xs text-[#364C49] font-bold focus:outline-none focus:border-[#DD5757]"
-                    >
-                      <option value="customer">Покупатель (Клиент)</option>
-                      <option value="operator">Оператор лаборатории</option>
-                    </select>
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div>
-              <label className="text-[11px] font-bold text-[#364C49] block mb-1">
-                Email адрес
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full bg-[#F6EFE6]/50 border border-[#EDE1D5] rounded-xl pl-8 pr-3 py-2 text-xs text-[#364C49] font-medium focus:outline-none focus:border-[#DD5757]"
-                />
-                <Mail className="w-4 h-4 text-[#7A8C88] absolute left-2.5 top-2.5" />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-bold text-[#364C49] block mb-1">
-                Пароль
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Минимум 6 символов"
-                  className="w-full bg-[#F6EFE6]/50 border border-[#EDE1D5] rounded-xl pl-8 pr-9 py-2 text-xs text-[#364C49] font-medium focus:outline-none focus:border-[#DD5757]"
-                />
-                <Lock className="w-4 h-4 text-[#7A8C88] absolute left-2.5 top-2.5" />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2.5 top-2.5 text-[#7A8C88] hover:text-[#364C49]"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3.5 rounded-full bg-[#DD5757] hover:bg-[#c94b4b] text-white font-extrabold text-xs flex items-center justify-center space-x-2 shadow-sm shadow-[#DD5757]/20 cursor-pointer disabled:opacity-60 transition-all"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Связь с базой данных...</span>
-                </>
-              ) : (
-                <>
-                  <span>{mode === 'login' ? 'Войти в аккаунт' : 'Зарегистрироваться'}</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Anonymous Guest Option */}
-          <div className="pt-2 border-t border-[#EDE1D5] text-center space-y-2">
-            <p className="text-[11px] text-[#7A8C88]">
-              Не хотите регистрироваться сейчас?
-            </p>
-            <button
-              type="button"
-              onClick={handleAnonymous}
-              disabled={isLoading}
-              className="w-full py-2.5 rounded-full bg-[#F6EFE6] hover:bg-[#EDE1D5] text-[#364C49] text-xs font-bold transition-all border border-[#EDE1D5] cursor-pointer"
-            >
-              Продолжить анонимно (Гостевой режим)
-            </button>
-          </div>
-        </div>
+        )}
       </div>
-    </div>
+
+      <div className="space-y-4 p-5">
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-[#F6EFE6] p-1 text-sm font-bold">
+          {(['login', 'register'] as const).map(option => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={mode === option}
+              disabled={!!pending}
+              onClick={() => { setMode(option); setError(''); }}
+              className={`rounded-lg py-2 ${mode === option ? 'bg-white shadow-sm' : 'hover:bg-white/60'}`}
+            >
+              {option === 'login' ? 'Вход' : 'Регистрация'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3" key={mode}>
+          {mode === 'register' && (
+            <label className="block space-y-1 text-xs font-bold">
+              <span>Имя</span>
+              <input className={inputClass} name="name" autoComplete="name" maxLength={100} required />
+            </label>
+          )}
+          <label className="block space-y-1 text-xs font-bold">
+            <span>Email</span>
+            <input className={inputClass} name="email" type="email" autoComplete="username" maxLength={254} required />
+          </label>
+          <div className="space-y-1">
+            <label htmlFor="auth-password" className="block text-xs font-bold">Пароль</label>
+            <div className="relative">
+              <input
+                id="auth-password"
+                className={`${inputClass} pr-10`}
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                minLength={mode === 'register' ? 8 : undefined}
+                required
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                onClick={() => setShowPassword(value => !value)}
+                className="absolute inset-y-0 right-0 px-3 text-[#596c67]"
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+            {mode === 'register' && <p className="text-xs text-[#596c67]">Минимум 8 символов.</p>}
+          </div>
+          {mode === 'register' && (
+            <label className="block space-y-1 text-xs font-bold">
+              <span>Телефон (необязательно)</span>
+              <input className={inputClass} name="phone" type="tel" autoComplete="tel" maxLength={32} />
+            </label>
+          )}
+          {error && <p role="alert" className="rounded-xl bg-red-50 p-2.5 text-xs text-red-800">{error}</p>}
+          <button
+            type="submit"
+            disabled={!!pending}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#B83D3D] py-3 text-sm font-extrabold text-white hover:bg-[#A33232] disabled:opacity-60"
+          >
+            {pending === 'account' ? 'Подождите…' : mode === 'login' ? 'Войти в аккаунт' : 'Зарегистрироваться'}
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </button>
+        </form>
+
+        {!onClose && (
+          <div className="space-y-2 border-t border-[#EDE1D5] pt-4 text-center">
+            <button
+              type="button"
+              disabled={!!pending}
+              onClick={() => void authorize('guest', loginAnonymous)}
+              className="w-full rounded-xl bg-[#F6EFE6] py-2.5 text-sm font-bold hover:bg-[#EDE1D5] disabled:opacity-60"
+            >
+              {pending === 'guest' ? 'Открываем каталог…' : 'Продолжить как гость'}
+            </button>
+            <p className="text-xs text-[#596c67]">Каталог и предпросмотр доступны без аккаунта.</p>
+          </div>
+        )}
+      </div>
+    </dialog>
   );
-};
+}

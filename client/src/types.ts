@@ -116,6 +116,7 @@ export interface CartItem {
   unitPrice: number;
   totalPrice: number;
   type: 'book' | 'prints';
+  photos?: { url: string; count: number }[];
   details?: Record<string, any>;
   document?: PhotobookDocument;
 }
@@ -169,3 +170,13 @@ export interface AuthUser {
   address?: string;
 }
 
+
+export interface OrderQuote {
+  subtotal: number;
+  deliveryAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  promoError: string | null;
+}
+
+export type CreatedOrder = Pick<Order, 'id' | 'orderNumber' | 'totalAmount' | 'deliveryAmount'>;

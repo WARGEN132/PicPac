@@ -1,196 +1,109 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../db/database';
+import { closeSession, openSession, readSession } from '../session';
 
 export const authRouter = Router();
+authRouter.use('/auth', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
-// POST /api/auth/login — Authenticate user against SQLite
-authRouter.post('/auth/login', (req: Request, res: Response) => {
+authRouter.get('/auth/me', (req, res) => {
+  res.json({ user: readSession(req) });
+});
+
+authRouter.post('/auth/login', async (req, res, next) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password } = req.body ?? {};
+    if (typeof email !== 'string' || !email.trim() ||
+        typeof password !== 'string' || !password || Buffer.byteLength(password) > 72) {
       return res.status(400).json({ error: 'Укажите email и пароль' });
     }
 
     const db = getDatabase();
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim().toLowerCase()) as any;
-
-    if (!user) {
-      return res.status(401).json({ error: 'Пользователь с таким email не найден' });
+    const user = db.prepare("SELECT id, password_hash FROM users WHERE email = ? AND role <> 'guest'")
+      .get(email.trim().toLowerCase()) as { id: string; password_hash: string } | undefined;
+    if (!user || !await bcrypt.compare(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Неверный email или пароль' });
     }
 
-    const isMatch = bcrypt.compareSync(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Неверный пароль' });
-    }
-
-    // Get customer details if exists
-    const customer = db.prepare('SELECT * FROM customers WHERE user_id = ?').get(user.id) as any;
-
-    // Log in audit log
+    const profile = db.prepare(`
+      SELECT u.id, u.email, u.role, c.name, c.phone, c.address
+      FROM users u LEFT JOIN customers c ON c.user_id = u.id WHERE u.id = ?
+    `).get(user.id) as { id: string; email: string; role: string; name?: string; phone?: string; address?: string };
+    openSession(req, res, user.id);
     db.prepare(`
-      INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json, ip_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      user.id,
-      new Date().toISOString(),
-      'auth:login',
-      'user',
-      user.id,
-      'success',
-      JSON.stringify({ role: user.role, email: user.email }),
-      req.ip || '127.0.0.1'
-    );
-
-    return res.json({
+      INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, ip_address)
+      VALUES (?, ?, ?, 'auth:login', 'user', ?, 'success', ?)
+    `).run(uuidv4(), user.id, new Date().toISOString(), user.id, req.ip || '127.0.0.1');
+    res.json({
       success: true,
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        name: customer ? customer.name : (user.role === 'operator' ? 'Оператор Анна' : 'Покупатель'),
-        phone: customer ? customer.phone : '+375 29 123-45-67',
-        address: customer ? customer.address : 'г. Минск, пр-т Победителей, 10'
+        ...profile,
+        name: profile.name || (profile.role === 'operator' ? 'Оператор' : 'Покупатель'),
+        phone: profile.phone || '',
+        address: profile.address || ''
       }
     });
-  } catch (err: any) {
-    console.error('Login error:', err);
-    return res.status(500).json({ error: 'Ошибка авторизации на сервере: ' + err.message });
+  } catch (error) {
+    next(error);
   }
 });
 
-// POST /api/auth/register — Register new customer or operator
-authRouter.post('/auth/register', (req: Request, res: Response) => {
+authRouter.post('/auth/register', async (req, res, next) => {
   try {
-    const { email, password, name, phone, address, role = 'customer' } = req.body;
-
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: 'Заполните обязательные поля: имя, email и пароль' });
+    const { email, password, name, phone = '', address = '' } = req.body ?? {};
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
+        email.trim().length > 254 || typeof name !== 'string' || !name.trim() || name.trim().length > 100 ||
+        typeof phone !== 'string' || phone.length > 32 || typeof address !== 'string' || address.length > 300) {
+      return res.status(400).json({ error: 'Проверьте имя, email и контактные данные' });
+    }
+    if (typeof password !== 'string' || password.length < 8 || Buffer.byteLength(password) > 72) {
+      return res.status(400).json({ error: 'Пароль должен содержать не менее 8 символов и занимать до 72 байт' });
     }
 
+    const db = getDatabase();
     const normalizedEmail = email.trim().toLowerCase();
-    const db = getDatabase();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const now = new Date().toISOString();
+    const user = {
+      id: `usr-${uuidv4()}`,
+      email: normalizedEmail,
+      role: 'customer',
+      name: name.trim(),
+      phone: phone.trim(),
+      address: address.trim()
+    };
 
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
-    if (existing) {
-      return res.status(409).json({ error: 'Пользователь с таким email уже зарегистрирован' });
-    }
+    const registered = db.transaction(() => {
+      if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail)) return false;
+      db.prepare("INSERT INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, ?, 'customer', ?)")
+        .run(user.id, normalizedEmail, passwordHash, now);
+      db.prepare('INSERT INTO customers (id, user_id, name, phone, address, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(`cust-${uuidv4()}`, user.id, user.name, user.phone, user.address, now);
+      db.prepare(`
+        INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result)
+        VALUES (?, ?, ?, 'auth:register', 'user', ?, 'success')
+      `).run(uuidv4(), user.id, now, user.id);
+      return true;
+    }).immediate();
 
-    const userId = `usr-${Date.now()}-${uuidv4().slice(0, 6)}`;
-    const customerId = `cust-${Date.now()}-${uuidv4().slice(0, 6)}`;
-    const nowIso = new Date().toISOString();
-    const passwordHash = bcrypt.hashSync(password, 10);
-    const userRole = role === 'operator' ? 'operator' : 'customer';
-
-    const insertUser = db.prepare(`
-      INSERT INTO users (id, email, password_hash, role, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    const insertCustomer = db.prepare(`
-      INSERT INTO customers (id, user_id, name, phone, address, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    db.transaction(() => {
-      insertUser.run(userId, normalizedEmail, passwordHash, userRole, nowIso);
-      insertCustomer.run(
-        customerId,
-        userId,
-        name.trim(),
-        phone ? phone.trim() : '+375 29 000-00-00',
-        address ? address.trim() : 'г. Минск, Беларусь',
-        nowIso
-      );
-    })();
-
-    // Audit log
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json, ip_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      userId,
-      nowIso,
-      'auth:register',
-      'user',
-      userId,
-      'success',
-      JSON.stringify({ role: userRole, email: normalizedEmail, name }),
-      req.ip || '127.0.0.1'
-    );
-
-    return res.status(201).json({
-      success: true,
-      user: {
-        id: userId,
-        email: normalizedEmail,
-        role: userRole,
-        name: name.trim(),
-        phone: phone || '',
-        address: address || ''
-      }
-    });
-  } catch (err: any) {
-    console.error('Registration error:', err);
-    return res.status(500).json({ error: 'Ошибка регистрации: ' + err.message });
+    if (!registered) return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+    openSession(req, res, user.id);
+    res.status(201).json({ success: true, user });
+  } catch (error) {
+    next(error);
   }
 });
 
-// POST /api/auth/anonymous — Quick guest session with DB persistence
-authRouter.post('/auth/anonymous', (req: Request, res: Response) => {
-  try {
-    const guestId = `usr-guest-${Date.now()}-${uuidv4().slice(0, 6)}`;
-    const guestEmail = `guest-${guestId.slice(-6)}@picpac.by`;
-    const nowIso = new Date().toISOString();
-    const db = getDatabase();
-
-    db.prepare(`
-      INSERT INTO users (id, email, password_hash, role, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(guestId, guestEmail, 'anonymous-guest', 'guest', nowIso);
-
-    return res.json({
-      success: true,
-      user: {
-        id: guestId,
-        email: guestEmail,
-        role: 'guest',
-        name: 'Гость (Анонимный режим)',
-        phone: '',
-        address: ''
-      }
-    });
-  } catch (err: any) {
-    console.error('Anonymous auth error:', err);
-    return res.status(500).json({ error: 'Ошибка гостевого входа' });
-  }
+authRouter.post('/auth/anonymous', (req, res) => {
+  openSession(req, res, null);
+  res.json({ success: true, user: { id: 'guest', role: 'guest', email: '', name: 'Гость', phone: '', address: '' } });
 });
 
-// GET /api/auth/test-users — Quick demo accounts list for evaluation
-authRouter.get('/auth/test-users', (req: Request, res: Response) => {
-  return res.json({
-    accounts: [
-      {
-        role: 'customer',
-        roleLabel: 'Обычный покупатель',
-        email: 'customer@test.by',
-        passwordHint: 'Customer123!',
-        name: 'Иван Тестович Радкевич',
-        phone: '+375 29 123-45-67',
-        description: 'Видит личный кабинет, дорожку доставки заказа, сохранённые черновики и корзину.'
-      },
-      {
-        role: 'operator',
-        roleLabel: 'Оператор лаборатории',
-        email: 'operator@test.by',
-        passwordHint: 'Operator123!',
-        name: 'Оператор Анна (Фотопринт)',
-        phone: '+375 17 200-11-22',
-        description: 'Имеет доступ к очереди заказов, смене производственных статусов и журналу аудита.'
-      }
-    ]
-  });
+authRouter.post('/auth/logout', (req, res) => {
+  closeSession(req, res);
+  res.sendStatus(204);
 });

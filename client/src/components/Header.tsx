@@ -1,27 +1,15 @@
 import React from 'react';
-import { Camera, ShoppingBag, PhoneCall, ShieldCheck, User } from 'lucide-react';
+import { Camera, ShoppingBag, PhoneCall, ShieldCheck, LogIn, LogOut } from 'lucide-react';
 
 interface HeaderProps {
-  currentTab: string;
   cartCount: number;
-  cartTotal?: number;
-  onOpenCart: () => void;
+  onOpenCart?: () => void;
   isOperator?: boolean;
-  onToggleOperator?: () => void;
   onOpenAuth?: () => void;
-  userName?: string;
-  userRole?: string;
+  onSignOut?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  cartCount,
-  onOpenCart,
-  isOperator = false,
-  onToggleOperator,
-  onOpenAuth,
-  userName,
-  userRole
-}) => {
+export const Header: React.FC<HeaderProps> = ({ cartCount, onOpenCart, isOperator, onOpenAuth, onSignOut }) => {
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#EDE1D5] text-[#364C49] px-3.5 py-2.5 shadow-xs">
       <div className="flex items-center justify-between">
@@ -44,36 +32,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Center / Right controls */}
         <div className="flex items-center space-x-2">
-          {/* User Auth Badge / Login & Switcher */}
-          {onOpenAuth && (
+          {isOperator && (
+            <span className="flex items-center gap-1 rounded-full bg-[#364C49] px-2 py-1 text-[10px] font-bold text-white">
+              <ShieldCheck className="size-3" /> Оператор
+            </span>
+          )}
+          {(onOpenAuth || onSignOut) && (
             <button
               type="button"
-              onClick={onOpenAuth}
-              title="Вход / Регистрация в БД / Смена роли"
-              className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
-                isOperator
-                  ? 'bg-[#364C49] text-white border-[#364C49]'
-                  : userRole === 'guest'
-                  ? 'bg-[#EDE1D5] text-[#364C49] border-[#EDE1D5]'
-                  : 'bg-[#F6EFE6] text-[#364C49] border-[#EDE1D5] hover:border-[#364C49]'
-              }`}
+              onClick={onOpenAuth ?? onSignOut}
+              className="flex items-center gap-1 rounded-full border border-[#EDE1D5] bg-[#F6EFE6] px-2.5 py-1.5 text-xs font-bold hover:bg-[#EDE1D5]"
             >
-              {isOperator ? (
-                <>
-                  <ShieldCheck className="w-3 h-3 text-[#7AA45A]" />
-                  <span>Оператор</span>
-                </>
-              ) : userRole === 'guest' ? (
-                <>
-                  <User className="w-3 h-3 text-[#7A8C88]" />
-                  <span>Гость</span>
-                </>
-              ) : (
-                <>
-                  <User className="w-3 h-3 text-[#DD5757]" />
-                  <span>{userName ? userName.split(' ')[0] : 'Клиент'}</span>
-                </>
-              )}
+              {onOpenAuth ? <LogIn className="size-3" /> : <LogOut className="size-3" />}
+              {onOpenAuth ? 'Войти' : 'Выйти'}
             </button>
           )}
 
@@ -86,8 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
             <PhoneCall className="w-3.5 h-3.5 text-[#DD5757]" />
           </a>
 
-          {/* Prominent Shopping Cart Button */}
-          <button
+          {onOpenCart && <button
             type="button"
             onClick={onOpenCart}
             aria-label="Открыть корзину заказа"
@@ -104,7 +74,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {cartCount}
               </span>
             )}
-          </button>
+          </button>}
         </div>
       </div>
     </header>

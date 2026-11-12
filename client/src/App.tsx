@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AuthModal } from './components/AuthModal';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { BookCreatorModal } from './components/BookCreatorModal';
@@ -15,10 +16,14 @@ import {
   updateProject,
   deleteProject,
   duplicateProject,
-  createTicket
+  createTicket,
+  createProject,
+  quoteOrder,
+  fetchSession,
+  logoutUser
 } from './services/api';
-import { Product, Project, CartItem, Order, PhotobookDocument } from './types';
-import { IdeasRemixFeed, IDEAS_LIST } from './components/IdeasRemixFeed';
+import { Product, Project, CartItem, Order, PhotobookDocument, OrderQuote, AuthUser } from './types';
+import { IdeasRemixFeed } from './components/IdeasRemixFeed';
 import {
   Sparkles,
   Camera,
@@ -40,19 +45,85 @@ import {
 } from 'lucide-react';
 
 export default function ClientApp() {
-  const [activeTab, setActiveTab] = useState<string>('home');
+  const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
+  const [showAuth, setShowAuth] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [sessionError, setSessionError] = useState(false);
+  const signingOut = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSession(controller.signal)
+      .then(setUser)
+      .catch(() => {
+        if (!controller.signal.aborted) setSessionError(true);
+      });
+    return () => controller.abort();
+  }, [retry]);
+
+  const handleSignOut = async () => {
+    if (signingOut.current) return;
+    signingOut.current = true;
+    try {
+      await logoutUser();
+      setShowAuth(false);
+      setUser(null);
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      signingOut.current = false;
+    }
+  };
+
+  if (user === undefined) {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-[#F6EFE6] p-4 text-sm font-bold text-[#364C49]">
+        {sessionError ? (
+          <div className="space-y-3 text-center" role="alert">
+            <p>Не удалось открыть PicPac.</p>
+            <button type="button" onClick={() => { setSessionError(false); setRetry(value => value + 1); }}
+              className="rounded-xl bg-[#364C49] px-4 py-2 text-white">Повторить</button>
+          </div>
+        ) : <p role="status">Открываем PicPac…</p>}
+      </main>
+    );
+  }
+
+  return (
+    <>
+      {user && <Shop user={user} onOpenAuth={() => setShowAuth(true)} onSignOut={handleSignOut} />}
+      {(!user || showAuth) && (
+        <AuthModal
+          onClose={user ? () => setShowAuth(false) : undefined}
+          onAuthSuccess={account => { setUser(account); setShowAuth(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+interface ShopProps {
+  user: AuthUser;
+  onOpenAuth: () => void;
+  onSignOut: () => void;
+}
+
+function Shop({ user, onOpenAuth, onSignOut }: ShopProps) {
+  const isOperator = user.role === 'operator';
+  const isGuest = user.role === 'guest';
+  const canOrder = user.role === 'customer';
+  const [activeTab, setActiveTab] = useState(isOperator ? 'profile' : 'home');
   const [previousTab, setPreviousTab] = useState<string>('home');
   const [products, setProducts] = useState<Product[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isOperator, setIsOperator] = useState<boolean>(false);
+  const latestLoad = useRef(0);
 
   // Active Modals / Flows
   const [isBookCreatorOpen, setIsBookCreatorOpen] = useState<boolean>(false);
-  const [isPrintsOrderOpen, setIsPrintsOrderOpen] = useState<boolean>(false);
-  const [editingProject, setEditingProject] = useState<{ doc: PhotobookDocument; projectId?: string } | null>(null);
+  const [printsProduct, setPrintsProduct] = useState<Product | null>(null);
+  const [editingProject, setEditingProject] = useState<{ doc: PhotobookDocument; productId: string; variantId?: string; projectId?: string } | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
   const [catalogCategory, setCatalogCategory] = useState<string>('all');
   const [selectedProductDetails, setSelectedProductDetails] = useState<Product | null>(null);
@@ -65,157 +136,37 @@ export default function ClientApp() {
 
   // Promo code
   const [promoCodeInput, setPromoCodeInput] = useState<string>('START10');
-  const [appliedPromo, setAppliedPromo] = useState<string>('START10');
-
-  const currentUserId = isOperator ? 'usr-test-operator-001' : 'usr-test-customer-001';
+  const [appliedPromo, setAppliedPromo] = useState('START10');
+  const [pricedCart, setPricedCart] = useState<{
+    items: CartItem[]; promo: string; quote?: OrderQuote; error?: string;
+  } | null>(null);
 
   const loadAllData = async () => {
+    const request = ++latestLoad.current;
     try {
-      setIsLoading(true);
       const [productsData, projectsData, ordersData] = await Promise.all([
         fetchProducts(),
-        fetchProjects(currentUserId, isOperator),
-        fetchOrders(currentUserId, isOperator)
+        isGuest ? Promise.resolve([]) : fetchProjects(),
+        canOrder ? fetchOrders() : Promise.resolve([])
       ]);
+      if (request !== latestLoad.current) return;
       setProducts(productsData);
-      if (projectsData.length === 0) {
-        const starter = IDEAS_LIST[0];
-        const defaultProject: Project = {
-          id: 'demo-starter-project',
-          userId: currentUserId,
-          productId: 'prod-book-classic',
-          title: starter.title,
-          status: 'draft',
-          productName: 'Фотокнига Classic 20×20',
-          productCategory: 'photobook',
-          productImageUrl: starter.coverImage,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          document: {
-            version: '1.0',
-            title: starter.title,
-            theme: starter.categoryTag,
-            style: 'craft',
-            format: '20×20 см',
-            coverType: 'Тканевый лён',
-            cover: {
-              title: starter.title,
-              subtitle: starter.subtitle,
-              coverPhotoUrl: starter.coverImage,
-              backgroundColor: '#364C49',
-              material: 'Тканевый лён',
-              fontFamily: 'Comfortaa'
-            },
-            spreads: [
-              {
-                id: 'starter-spread-1',
-                spreadIndex: 0,
-                title: 'Разворот 1 • Начало пути',
-                leftPage: {
-                  id: 'st-p-1',
-                  pageNumber: 1,
-                  backgroundColor: '#FFFFFF',
-                  elements: [
-                    {
-                      id: 'st-el-1',
-                      type: 'photo',
-                      x: 10,
-                      y: 10,
-                      width: 80,
-                      height: 80,
-                      zIndex: 1,
-                      photoUrl: starter.photos[0],
-                      caption: 'Начало путешествия'
-                    }
-                  ]
-                },
-                rightPage: {
-                  id: 'st-p-2',
-                  pageNumber: 2,
-                  backgroundColor: '#FFFFFF',
-                  elements: [
-                    {
-                      id: 'st-el-2',
-                      type: 'photo',
-                      x: 10,
-                      y: 10,
-                      width: 80,
-                      height: 80,
-                      zIndex: 1,
-                      photoUrl: starter.photos[1] || starter.photos[0],
-                      caption: 'Тёплые закаты'
-                    }
-                  ]
-                }
-              },
-              {
-                id: 'starter-spread-2',
-                spreadIndex: 1,
-                title: 'Разворот 2 • Панорама',
-                leftPage: {
-                  id: 'st-p-3',
-                  pageNumber: 3,
-                  backgroundColor: '#FFFFFF',
-                  elements: [
-                    {
-                      id: 'st-el-3',
-                      type: 'photo',
-                      x: 8,
-                      y: 12,
-                      width: 84,
-                      height: 76,
-                      zIndex: 1,
-                      photoUrl: starter.photos[2] || starter.photos[0],
-                      caption: 'Браславские озёра'
-                    }
-                  ]
-                },
-                rightPage: {
-                  id: 'st-p-4',
-                  pageNumber: 4,
-                  backgroundColor: '#FFFFFF',
-                  elements: [
-                    {
-                      id: 'st-el-4',
-                      type: 'photo',
-                      x: 8,
-                      y: 12,
-                      width: 84,
-                      height: 76,
-                      zIndex: 1,
-                      photoUrl: starter.photos[3] || starter.photos[1]
-                    }
-                  ]
-                }
-              }
-            ],
-            productionSettings: {
-              widthMm: 200,
-              heightMm: 200,
-              safeZoneMm: 5,
-              bleedMm: 3,
-              spineMm: 8
-            }
-          }
-        };
-        setProjects([defaultProject]);
-      } else {
-        setProjects(projectsData);
-      }
+      setProjects(projectsData);
       setOrders(ordersData);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Data load error:', err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadAllData();
-  }, [isOperator]);
+    if (isOperator) setActiveTab('profile');
+    void loadAllData();
+    return () => { latestLoad.current++; };
+  }, [user.id, user.role]);
 
   // Handle opening cart from top header
   const handleOpenCart = () => {
+    if (!canOrder) return;
     if (activeTab !== 'cart') {
       setPreviousTab(activeTab);
       setActiveTab('cart');
@@ -227,13 +178,21 @@ export default function ClientApp() {
     setActiveTab(previousTab || 'home');
   };
 
-  // Handle Book Ready from Home Studio or Book Creator Modal
-  const handleBookGenerated = async (doc: PhotobookDocument) => {
+  const classicBook = products.find(product => product.id === 'prod-book-classic');
+  const defaultPrints = products.find(product => product.category === 'prints' && product.variants.length > 0);
+  const defaultBookVariant = classicBook?.variants.find(variant => variant.isDefault);
+
+  const handleBookGenerated = (
+    doc: PhotobookDocument,
+    productId = classicBook?.id,
+    variantId = defaultBookVariant?.id
+  ) => {
+    if (!productId) {
+      alert('Каталог пока недоступен. Попробуйте ещё раз после загрузки.');
+      return;
+    }
     setIsBookCreatorOpen(false);
-    setEditingProject({
-      doc,
-      projectId: undefined
-    });
+    setEditingProject({ doc, productId, variantId });
   };
 
   // Handle Remix from Ideas Feed (1-click generation from curated story)
@@ -350,23 +309,33 @@ export default function ClientApp() {
       }
     };
 
-    setEditingProject({
-      doc,
-      projectId: undefined
-    });
+    handleBookGenerated(doc);
   };
 
-  // Add Book from Editor to Cart
-  const handleAddBookToCart = (doc: PhotobookDocument) => {
+  const openPrints = (product: Product | undefined) => {
+    if (canOrder && product) setPrintsProduct(product);
+    else if (isGuest) onOpenAuth();
+  };
+
+  const handleAddBookToCart = (doc: PhotobookDocument, productId: string, variantId?: string) => {
+    if (!canOrder) return;
+    const product = products.find(item => item.id === productId);
+    if (!product) {
+      alert('Эта фотокнига сейчас недоступна в каталоге.');
+      return;
+    }
+    const variant = product.variants.find(item => item.id === variantId);
+    const price = variant?.totalPrice ?? product.basePrice;
     const newItem: CartItem = {
       id: `cart-book-${Date.now()}`,
-      productId: 'prod-book-classic',
-      productName: doc.title || 'Фотокнига Classic 20×20',
+      productId,
+      variantId,
+      productName: doc.title || product.name,
       variantName: `${doc.format} • ${doc.coverType}`,
       imageUrl: doc.cover.coverPhotoUrl,
       quantity: 1,
-      unitPrice: 38.99, // Brandbook price (was 70.90)
-      totalPrice: 38.99,
+      unitPrice: price,
+      totalPrice: price,
       type: 'book',
       document: doc,
       details: {
@@ -387,20 +356,29 @@ export default function ClientApp() {
     setActiveTab('cart');
   };
 
-  // Cart calculations
-  const cartSubtotal = cart.reduce((acc, item) => acc + item.totalPrice, 0);
-  let cartDiscount = 0;
-  if (appliedPromo.toUpperCase() === 'START10') {
-    cartDiscount = Math.round(cartSubtotal * 0.1 * 100) / 100;
-  } else if (appliedPromo.toUpperCase() === 'HACKATHON') {
-    cartDiscount = Math.round(cartSubtotal * 0.15 * 100) / 100; // 15% hackathon promo
-  } else if (appliedPromo.toUpperCase() === 'PICPAC5') {
-    cartDiscount = Math.min(cartSubtotal, 5.0);
-  }
-  const cartTotal = Math.max(0, Math.round((cartSubtotal - cartDiscount) * 100) / 100);
+  useEffect(() => {
+    if (!cart.length) return;
+    const controller = new AbortController();
+    quoteOrder(cart, appliedPromo, controller.signal)
+      .then(quote => setPricedCart({ items: cart, promo: appliedPromo, quote }))
+      .catch(error => {
+        if (!controller.signal.aborted) {
+          setPricedCart({ items: cart, promo: appliedPromo, error: error.message });
+        }
+      });
+    return () => controller.abort();
+  }, [cart, appliedPromo]);
+
+  const currentPricing = pricedCart?.items === cart && pricedCart.promo === appliedPromo ? pricedCart : null;
+  const quote = currentPricing?.quote;
+  const cartSubtotal = quote?.subtotal ?? cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  const cartDiscount = quote?.discountAmount ?? 0;
+  const cartTotal = cartSubtotal - cartDiscount;
 
   const handleApplyPromo = () => {
-    setAppliedPromo(promoCodeInput.trim().toUpperCase());
+    const code = promoCodeInput.trim().toUpperCase();
+    if (code === appliedPromo && currentPricing?.error) setCart(items => [...items]);
+    setAppliedPromo(code);
   };
 
   const handleRemoveCartItem = (id: string) => {
@@ -432,7 +410,6 @@ export default function ClientApp() {
     try {
       await createTicket({
         orderId: supportModalOrder?.id,
-        userId: currentUserId,
         subject: ticketSubject,
         message: ticketMessage
       });
@@ -446,6 +423,10 @@ export default function ClientApp() {
       alert('Ошибка: ' + err.message);
     }
   };
+
+  const editingProduct = products.find(product => product.id === editingProject?.productId);
+  const editingPrice = editingProduct?.variants.find(variant => variant.id === editingProject?.variantId)?.totalPrice
+    ?? editingProduct?.basePrice;
 
   return (
     <div className="min-h-screen bg-[#EAE5DC] flex items-center justify-center p-0 sm:py-6 text-[#364C49] font-sans selection:bg-[#DD5757] selection:text-white">
@@ -477,24 +458,29 @@ export default function ClientApp() {
 
         {/* Application Header (Cart, Hotline, Role toggle for jury) */}
         <Header
-          currentTab={activeTab}
           cartCount={cart.length}
-          cartTotal={cartTotal}
-          onOpenCart={handleOpenCart}
+          onOpenCart={canOrder ? handleOpenCart : undefined}
+          onOpenAuth={isGuest ? onOpenAuth : undefined}
+          onSignOut={isGuest ? undefined : onSignOut}
           isOperator={isOperator}
-          onToggleOperator={() => setIsOperator(!isOperator)}
         />
 
         {/* Scrollable Screen Content */}
         <main className="flex-1 overflow-y-auto px-4 py-3 pb-24 space-y-4">
+          {isGuest && (
+            <p className="rounded-xl border border-[#EDE1D5] bg-white px-3 py-2 text-xs text-[#596c67]">
+              Вы вошли как гость. Для сохранения макетов и заказа войдите в аккаунт.
+            </p>
+          )}
           
           {/* ========================================================= */}
           {/* 1. ГЛАВНАЯ (HOME) — Фото загрузка, редактор и обложка     */}
           {/* ========================================================= */}
           {activeTab === 'home' && (
             <HomePhotoCoverStudio
+              product={classicBook}
               onBookReady={handleBookGenerated}
-              onOpenPrints={() => setIsPrintsOrderOpen(true)}
+              onOpenPrints={() => openPrints(defaultPrints)}
               onOpenCatalog={() => setActiveTab('catalog')}
             />
           )}
@@ -528,7 +514,7 @@ export default function ClientApp() {
                 {[
                   { id: 'all', label: 'Все позиции' },
                   { id: 'photobook', label: 'Фотокниги' },
-                  { id: 'photo', label: 'Фотопечать' },
+                  { id: 'prints', label: 'Фотопечать' },
                   { id: 'canvas', label: 'Холсты и сувениры' }
                 ].map(cat => (
                   <button
@@ -552,7 +538,7 @@ export default function ClientApp() {
                   .filter(p => {
                     if (catalogCategory === 'all') return true;
                     if (catalogCategory === 'photobook') return p.category.includes('photobook');
-                    if (catalogCategory === 'photo') return p.category.includes('photo') && !p.category.includes('canvas');
+                    if (catalogCategory === 'prints') return p.category === 'prints';
                     if (catalogCategory === 'canvas') return p.category.includes('canvas') || p.category.includes('magnet');
                     return true;
                   })
@@ -601,17 +587,17 @@ export default function ClientApp() {
                             <Sparkles className="w-4 h-4" />
                             <span>Создать с ИИ</span>
                           </button>
-                        ) : (
+                        ) : product.category === 'prints' && product.variants.length && !isOperator ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              setIsPrintsOrderOpen(true);
-                            }}
+                            onClick={() => openPrints(product)}
                             className="flex-1 py-3.5 rounded-xl bg-[#364C49] hover:bg-[#283836] text-white text-xs font-black flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer"
                           >
                             <Camera className="w-4 h-4" />
-                            <span>Выбрать фотографии</span>
+                            <span>{isGuest ? 'Войти для заказа' : 'Выбрать фотографии'}</span>
                           </button>
+                        ) : (
+                          <span className="py-2 text-xs text-[#7C807F]">Заказ пока недоступен</span>
                         )}
                       </div>
                     </article>
@@ -623,7 +609,7 @@ export default function ClientApp() {
           {/* ========================================================= */}
           {/* 3. МАКЕТЫ (DRAFTS / PROJECTS)                             */}
           {/* ========================================================= */}
-          {activeTab === 'projects' && (
+          {!isGuest && activeTab === 'projects' && (
             <div className="space-y-4 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <div>
@@ -636,7 +622,11 @@ export default function ClientApp() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsBookCreatorOpen(true)}
+                  onClick={() => {
+                    setSelectedProductDetails(null);
+                    setIsBookCreatorOpen(true);
+                  }}
+                  disabled={!classicBook}
                   className="px-3.5 py-1.5 rounded-xl bg-[#DD5757] text-white font-bold text-xs flex items-center space-x-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -653,7 +643,7 @@ export default function ClientApp() {
                     Нет сохранённых макетов
                   </h3>
                   <p className="text-xs text-[#7C807F] max-w-xs mx-auto">
-                    Создайте фотокнигу на главной странице — черновик сохранится автоматически.
+                    Соберите фотокнигу и нажмите «Сохранить» в редакторе.
                   </p>
                   <button
                     type="button"
@@ -717,11 +707,11 @@ export default function ClientApp() {
                         </div>
 
                         <div className="flex items-center space-x-2">
-                          {project.document && (
+                          {canOrder && project.document && (
                             <button
                               type="button"
                               onClick={() => {
-                                handleAddBookToCart(project.document!);
+                                handleAddBookToCart(project.document!, project.productId, project.variantId);
                               }}
                               className="px-3.5 py-2 rounded-xl bg-[#F6EFE6] text-[#364C49] hover:bg-[#EAECE7] font-bold cursor-pointer"
                             >
@@ -732,7 +722,10 @@ export default function ClientApp() {
                             type="button"
                             onClick={() => {
                               if (project.document) {
-                                setEditingProject({ doc: project.document, projectId: project.id });
+                                setEditingProject({
+                                  doc: project.document, projectId: project.id,
+                                  productId: project.productId, variantId: project.variantId
+                                });
                               }
                             }}
                             className="px-4 py-2 rounded-xl bg-[#DD5757] text-white hover:bg-[#c94b4b] font-bold cursor-pointer"
@@ -751,7 +744,7 @@ export default function ClientApp() {
           {/* ========================================================= */}
           {/* 4. КОРЗИНА (CART) — Открывается сверху, удобный возврат   */}
           {/* ========================================================= */}
-          {activeTab === 'cart' && (
+          {canOrder && activeTab === 'cart' && (
             <div className="space-y-4 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <div>
@@ -850,6 +843,12 @@ export default function ClientApp() {
                     </button>
                   </div>
 
+                  {(currentPricing?.error || quote?.promoError) && (
+                    <p role="status" className="px-1 text-xs text-[#9A352F]">
+                      {currentPricing?.error || quote?.promoError}
+                    </p>
+                  )}
+
                   {/* Pricing Breakdown Card */}
                   <div className="bg-white rounded-2xl p-4 border border-[#BCBFB7]/40 space-y-2 text-xs">
                     <div className="flex justify-between text-[#7C807F]">
@@ -863,7 +862,7 @@ export default function ClientApp() {
                       </div>
                     )}
                     <div className="flex justify-between border-t border-[#BCBFB7]/30 pt-2 font-black text-sm text-[#364C49]">
-                      <span>Итого к оплате:</span>
+                      <span>Итого без доставки:</span>
                       <span className="text-[#DD5757] text-base">{cartTotal.toFixed(2)} BYN</span>
                     </div>
                   </div>
@@ -872,9 +871,10 @@ export default function ClientApp() {
                   <button
                     type="button"
                     onClick={() => setIsCheckoutOpen(true)}
-                    className="w-full py-4 rounded-2xl bg-[#DD5757] hover:bg-[#c94b4b] text-white font-black text-sm flex items-center justify-center space-x-2 shadow-lg shadow-[#DD5757]/20 cursor-pointer transition-all active:scale-[0.98]"
+                    disabled={!quote}
+                    className="disabled:opacity-50 disabled:cursor-wait w-full py-4 rounded-2xl bg-[#DD5757] hover:bg-[#c94b4b] text-white font-black text-sm flex items-center justify-center space-x-2 shadow-lg shadow-[#DD5757]/20 cursor-pointer transition-all active:scale-[0.98]"
                   >
-                    <span>Оформить заказ</span>
+                    <span>{!currentPricing ? 'Расчёт стоимости…' : 'Оформить заказ'}</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -885,21 +885,19 @@ export default function ClientApp() {
           {/* ========================================================= */}
           {/* 5. ПРОФИЛЬ И НАСТРОЙКИ (PROFILE & SETTINGS)              */}
           {/* ========================================================= */}
-          {activeTab === 'profile' && (
+          {!isGuest && activeTab === 'profile' && (
             <div className="space-y-4 animate-fadeIn">
               {isOperator ? (
-                <OperatorPanel onExit={() => setIsOperator(false)} />
+                <OperatorPanel />
               ) : (
                 <DeliveryTracker
                   orders={orders}
-                  currentUserId={currentUserId}
+                  currentUser={user}
                   onOpenSupport={(order) => {
                     setSupportModalOrder(order);
                     setTicketSubject(`Вопрос по заказу #${order.orderNumber}`);
                   }}
                   onRefresh={loadAllData}
-                  isOperator={isOperator}
-                  onToggleOperator={() => setIsOperator(!isOperator)}
                 />
               )}
             </div>
@@ -910,7 +908,9 @@ export default function ClientApp() {
         {/* NATIVE BOTTOM NAVIGATION (4 clean tabs: Главная, Каталог, Макеты, Профиль) */}
         <BottomNav
           activeTab={activeTab === 'cart' ? '' : activeTab}
-          onTabChange={tab => setActiveTab(tab)}
+          isGuest={isGuest}
+          isOperator={isOperator}
+          onTabChange={setActiveTab}
         />
 
         {/* NATIVE HOME INDICATOR BAR (iOS/Android) */}
@@ -929,10 +929,11 @@ export default function ClientApp() {
         )}
 
         {/* MODAL 2: PRINTS ORDER */}
-        {isPrintsOrderOpen && (
+        {canOrder && printsProduct && (
           <PrintsOrderModal
             products={products}
-            onClose={() => setIsPrintsOrderOpen(false)}
+            initialProduct={printsProduct}
+            onClose={() => setPrintsProduct(null)}
             onAddToCart={handleAddPrintsToCart}
           />
         )}
@@ -942,30 +943,43 @@ export default function ClientApp() {
           <AIEditor
             document={editingProject.doc}
             projectId={editingProject.projectId}
+            price={editingPrice}
+            onRequireAccount={isGuest ? onOpenAuth : undefined}
             onSave={async (updatedDoc) => {
               if (editingProject.projectId) {
-                await updateProject(editingProject.projectId, { document: updatedDoc });
+                await updateProject(editingProject.projectId, { title: updatedDoc.title, document: updatedDoc });
+              } else {
+                const { id } = await createProject({
+                  productId: editingProject.productId,
+                  variantId: editingProject.variantId,
+                  title: updatedDoc.title,
+                  document: updatedDoc
+                });
+                setEditingProject(current => current === editingProject
+                  ? { ...current, projectId: id }
+                  : current);
               }
+              await loadAllData();
             }}
-            onAddToCart={handleAddBookToCart}
+            onAddToCart={canOrder ? doc => handleAddBookToCart(doc, editingProject.productId, editingProject.variantId) : undefined}
             onClose={() => setEditingProject(null)}
           />
         )}
 
         {/* MODAL 4: CHECKOUT */}
-        {isCheckoutOpen && (
+        {canOrder && isCheckoutOpen && (
           <CheckoutModal
+            user={user}
             items={cart}
             subtotal={cartSubtotal}
             discountAmount={cartDiscount}
             promoCode={appliedPromo}
-            onClose={() => {
+            onClose={completed => {
               setIsCheckoutOpen(false);
-              setCart([]);
-              setActiveTab('profile');
-              loadAllData();
+              if (completed) setActiveTab('profile');
             }}
             onOrderCompleted={() => {
+              setCart([]);
               loadAllData();
             }}
           />
@@ -1003,7 +1017,7 @@ export default function ClientApp() {
                   <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-600" />
                   <p className="font-bold text-xs">Обращение принято!</p>
                   <p className="text-[11px] text-emerald-700">
-                    Оператор лаборатории свяжется с вами в течение 15 минут.
+                    Обращение сохранено и доступно в панели оператора.
                   </p>
                 </div>
               ) : (

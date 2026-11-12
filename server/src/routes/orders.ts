@@ -1,15 +1,18 @@
+import { createHash } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../db/database';
+import { requireAccount, requireCustomer, requireOperator } from '../session';
+import { OrderRequestError, priceOrder } from './order-pricing';
 
 export const ordersRouter = Router();
 
 // GET /api/orders — Get orders (filtered by user or all for operator)
-ordersRouter.get('/orders', (req: Request, res: Response) => {
+ordersRouter.get('/orders', requireAccount, (req: Request, res: Response) => {
   try {
     const db = getDatabase();
-    const userId = req.query.userId as string || 'usr-test-customer-001';
-    const isOperator = req.query.role === 'operator';
+    const { id: userId, role } = res.locals.account;
+    const isOperator = role === 'operator';
 
     let orders: any[];
     if (isOperator) {
@@ -24,7 +27,9 @@ ordersRouter.get('/orders', (req: Request, res: Response) => {
 
     const formattedOrders = orders.map(order => {
       const items = db.prepare(`
-        SELECT * FROM order_items WHERE order_id = ?
+        SELECT id, product_id, variant_id, project_id, quantity, unit_price, total_price,
+          json_remove(product_snapshot_json, '$.document', '$.photos') AS product_snapshot_json
+        FROM order_items WHERE order_id = ?
       `).all(order.id) as any[];
 
       const history = db.prepare(`
@@ -75,14 +80,15 @@ ordersRouter.get('/orders', (req: Request, res: Response) => {
 });
 
 // GET /api/orders/:id — Get order by ID or orderNumber
-ordersRouter.get('/orders/:id', (req: Request, res: Response) => {
+ordersRouter.get('/orders/:id', requireAccount, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const db = getDatabase();
 
+    const account = res.locals.account;
     const order = db.prepare(`
-      SELECT * FROM orders WHERE id = ? OR order_number = ?
-    `).get(id, id) as any;
+      SELECT * FROM orders WHERE (id = ? OR order_number = ?) AND (? = 'operator' OR user_id = ?)
+    `).get(id, id, account.role, account.id) as any;
 
     if (!order) {
       res.status(404).json({ success: false, error: 'Заказ не найден' });
@@ -122,7 +128,10 @@ ordersRouter.get('/orders/:id', (req: Request, res: Response) => {
           totalPrice: i.total_price,
           snapshot: i.product_snapshot_json ? JSON.parse(i.product_snapshot_json) : null
         })),
-        history,
+        itemsCount: items.length,
+        history: history.map(h => ({
+          id: h.id, status: h.status, comment: h.comment, createdAt: h.created_at
+        })),
         tickets
       }
     });
@@ -131,197 +140,151 @@ ordersRouter.get('/orders/:id', (req: Request, res: Response) => {
   }
 });
 
-// POST /api/orders — Create new order with Idempotency-Key support
-ordersRouter.post('/orders', (req: Request, res: Response) => {
+ordersRouter.post('/orders/quote', (req, res) => {
+  try {
+    const { quote } = priceOrder(getDatabase(), req.body);
+    res.json({ success: true, data: quote });
+  } catch (err) {
+    if (!(err instanceof OrderRequestError)) console.error('Order quote:', err);
+    res.status(err instanceof OrderRequestError ? err.status : 500).json({
+      success: false,
+      error: err instanceof OrderRequestError ? err.message : 'Не удалось рассчитать стоимость заказа'
+    });
+  }
+});
+
+ordersRouter.post('/orders', requireCustomer, (req, res) => {
   try {
     const db = getDatabase();
-    const idempotencyKey = req.headers['idempotency-key'] as string || req.body.idempotencyKey;
-
-    // Idempotency check: if key already exists, return previous response
-    if (idempotencyKey) {
-      const cached = db.prepare('SELECT * FROM idempotency_keys WHERE key = ?').get(idempotencyKey) as any;
-      if (cached && cached.response_body) {
-        return res.status(cached.response_code || 200).json(JSON.parse(cached.response_body));
-      }
+    const { idempotencyKey: bodyKey, ...body } = req.body;
+    const account = res.locals.account;
+    const userId = account.id;
+    const idempotencyKey = req.get('Idempotency-Key') || bodyKey;
+    if (idempotencyKey != null && (typeof idempotencyKey !== 'string' || idempotencyKey.length > 200)) {
+      throw new OrderRequestError('Некорректный ключ заказа');
     }
+    const requestHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
 
-    const {
-      userId = 'usr-test-customer-001',
-      contactName,
-      contactPhone,
-      contactEmail,
-      deliveryMethod = 'europost',
-      deliveryAddress = '',
-      items = [],
-      promoCode = '',
-      comment = ''
-    } = req.body;
+    const submitOrder = db.transaction(() => {
+      const {
+        contactName, contactPhone, contactEmail,
+        deliveryAddress = '', comment = ''
+      } = body;
 
-    if (!items || items.length === 0) {
-      res.status(400).json({ success: false, error: 'Корзина пуста' });
-      return;
-    }
-
-    const orderId = `ord-${uuidv4().slice(0, 8)}`;
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const orderNumber = `PP-2026-${randomNum}`;
-
-    let itemsTotal = 0;
-    for (const item of items) {
-      itemsTotal += Number(item.totalPrice || item.unitPrice * (item.quantity || 1));
-    }
-
-    // Delivery cost (Section 15 & docs/pricing_formula.md)
-    let deliveryAmount = 0.0;
-    if (deliveryMethod === 'courier') deliveryAmount = 8.5;
-    else if (deliveryMethod === 'europost') deliveryAmount = 5.0;
-    else if (deliveryMethod === 'belpost') deliveryAmount = 5.5;
-    else if (deliveryMethod === 'ems') deliveryAmount = 12.0;
-
-    // Promo code check
-    let discountAmount = 0.0;
-    let promoCodeId: string | null = null;
-    if (promoCode) {
-      const promo = db.prepare('SELECT * FROM promo_codes WHERE code = ? AND is_active = 1').get(promoCode.toUpperCase()) as any;
-      if (promo) {
-        promoCodeId = promo.id;
-        if (promo.discount_percent > 0) {
-          discountAmount = Math.round((itemsTotal * promo.discount_percent / 100) * 100) / 100;
-        } else if (promo.discount_fixed > 0) {
-          discountAmount = Math.min(itemsTotal, promo.discount_fixed);
+      if (idempotencyKey) {
+        const cached = db.prepare(`
+          SELECT user_id, request_hash, response_code, response_body FROM idempotency_keys WHERE key = ?
+        `).get(idempotencyKey) as {
+          user_id: string; request_hash: string; response_code: number; response_body: string;
+        } | undefined;
+        if (cached?.response_body) {
+          if (cached.user_id !== userId ||
+              (cached.request_hash !== idempotencyKey && cached.request_hash !== requestHash)) {
+            throw new OrderRequestError('Ключ уже использован для другого заказа', 409);
+          }
+          return { status: cached.response_code || 200, payload: JSON.parse(cached.response_body) };
         }
       }
-    }
 
-    const totalAmount = Math.max(0, Math.round((itemsTotal - discountAmount + deliveryAmount) * 100) / 100);
-    const nowIso = new Date().toISOString();
+      if ([contactName, contactPhone, contactEmail, deliveryAddress, comment]
+        .some(value => value != null && typeof value !== 'string')) {
+        throw new OrderRequestError('Некорректные контактные данные');
+      }
 
-    const runCreateOrder = db.transaction(() => {
-      // 1. Insert Order
+      const { items, promoCodeId, quote } = priceOrder(db, body);
+      const { deliveryMethod, deliveryAmount, totalAmount, discountAmount } = quote;
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const orderId = `ord-${uuidv4()}`;
+      const numberPrefix = `PP-${now.getUTCFullYear()}-`;
+      const { latest } = db.prepare(`
+        SELECT COALESCE(MAX(CAST(SUBSTR(order_number, ?) AS INTEGER)), 0) AS latest
+        FROM orders WHERE order_number LIKE ?
+      `).get(numberPrefix.length + 1, numberPrefix + '%') as { latest: number };
+      const orderNumber = numberPrefix + String(latest + 1).padStart(4, '0');
+
       db.prepare(`
         INSERT INTO orders (
           id, order_number, user_id, customer_id, idempotency_key, status,
           total_amount, discount_amount, delivery_amount, currency, delivery_method,
           delivery_address, contact_name, contact_phone, contact_email, promo_code_id,
           comment, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, (SELECT id FROM customers WHERE user_id = ? LIMIT 1), ?, 'received',
+          ?, ?, ?, 'BYN', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        orderId,
-        orderNumber,
-        userId,
-        null,
-        idempotencyKey || null,
-        'received',
-        totalAmount,
-        discountAmount,
-        deliveryAmount,
-        'BYN',
-        deliveryMethod,
-        deliveryAddress,
-        contactName || 'Иван Радкевич',
-        contactPhone || '+375 29 123-45-67',
-        contactEmail || 'customer@test.by',
-        promoCodeId,
-        comment,
-        nowIso,
-        nowIso
+        orderId, orderNumber, userId, userId, idempotencyKey || null,
+        totalAmount, discountAmount, deliveryAmount, deliveryMethod,
+        deliveryMethod === 'pickup_minsk' ? '' : deliveryAddress,
+        contactName || account.name, contactPhone || account.phone,
+        contactEmail || account.email, promoCodeId, comment, nowIso, nowIso
       );
 
-      // 2. Insert Order Items
-      const insertItemStmt = db.prepare(`
+      const insertItem = db.prepare(`
         INSERT INTO order_items (
           id, order_id, product_id, variant_id, project_id, quantity, unit_price, total_price, product_snapshot_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-
+      const findProject = db.prepare('SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND product_id = ?');
       for (const item of items) {
-        insertItemStmt.run(
-          uuidv4(),
-          orderId,
-          item.productId || 'prod-book-classic',
-          item.variantId || null,
-          item.projectId || null,
-          item.quantity || 1,
-          item.unitPrice || 0,
-          item.totalPrice || 0,
+        if (item.projectId != null && (typeof item.projectId !== 'string' ||
+            !findProject.get(item.projectId, userId, item.productId))) {
+          throw new OrderRequestError('Макет не найден для выбранного товара');
+        }
+        insertItem.run(
+          uuidv4(), orderId, item.productId, item.variantId, item.projectId ?? null,
+          item.quantity, item.unitPrice, item.totalPrice,
           JSON.stringify(item.snapshot || { title: item.title || 'Позиция PicPac' })
         );
       }
 
-      // 3. Insert Initial Status History
       db.prepare(`
         INSERT INTO order_status_history (id, order_id, status, comment, created_by_user_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(),
-        orderId,
-        'received',
-        'Заказ успешно оформлен и передан в систему PicPac',
-        userId,
-        nowIso
-      );
+        VALUES (?, ?, 'received', ?, ?, ?)
+      `).run(uuidv4(), orderId, 'Заказ принят в обработку', userId, nowIso);
 
-      // 4. Audit Log
       db.prepare(`
         INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(),
-        userId,
-        nowIso,
-        'order:create',
-        'order',
-        orderId,
-        'success',
-        JSON.stringify({ orderNumber, totalAmount, itemsCount: items.length })
-      );
+        VALUES (?, ?, ?, 'order:create', 'order', ?, 'success', ?)
+      `).run(uuidv4(), userId, nowIso, orderId, JSON.stringify({ orderNumber, totalAmount, itemsCount: items.length }));
+
+      const payload = {
+        success: true,
+        message: 'Заказ успешно создан',
+        data: {
+          id: orderId, orderNumber, status: 'received', totalAmount, discountAmount,
+          deliveryAmount, currency: 'BYN', deliveryMethod, createdAt: nowIso
+        }
+      };
+      if (idempotencyKey) {
+        db.prepare(`
+          INSERT INTO idempotency_keys (key, user_id, request_path, request_hash, response_code, response_body, created_at)
+          VALUES (?, ?, '/api/orders', ?, 201, ?, ?)
+        `).run(idempotencyKey, userId, requestHash, JSON.stringify(payload), nowIso);
+      }
+      return { status: 201, payload };
     });
 
-    runCreateOrder();
-
-    const responsePayload = {
-      success: true,
-      message: 'Заказ успешно создан',
-      data: {
-        id: orderId,
-        orderNumber,
-        status: 'received',
-        totalAmount,
-        discountAmount,
-        deliveryAmount,
-        currency: 'BYN',
-        deliveryMethod,
-        createdAt: nowIso
-      }
-    };
-
-    // Cache in idempotency_keys
-    if (idempotencyKey) {
-      db.prepare(`
-        INSERT OR REPLACE INTO idempotency_keys (key, user_id, request_path, request_hash, response_code, response_body, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        idempotencyKey,
-        userId,
-        '/api/orders',
-        idempotencyKey,
-        201,
-        JSON.stringify(responsePayload),
-        nowIso
-      );
-    }
-
-    res.status(201).json(responsePayload);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const { status, payload } = submitOrder.immediate();
+    res.status(status).json(payload);
+  } catch (err) {
+    if (!(err instanceof OrderRequestError)) console.error('Order creation:', err);
+    res.status(err instanceof OrderRequestError ? err.status : 500).json({
+      success: false,
+      error: err instanceof OrderRequestError ? err.message : 'Не удалось оформить заказ'
+    });
   }
 });
 
 // PATCH /api/orders/:id/status — Operator changes order status
-ordersRouter.patch('/orders/:id/status', (req: Request, res: Response) => {
+ordersRouter.patch('/orders/:id/status', requireOperator, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status, comment = '', operatorUserId = 'usr-test-operator-001' } = req.body;
+    const { status, comment = '' } = req.body;
+    const operatorUserId = res.locals.account.id;
+    const statuses = ['received', 'moderation', 'production', 'ready_for_delivery', 'completed', 'cancelled'];
+    if (!statuses.includes(status) || typeof comment !== 'string') {
+      return res.status(400).json({ success: false, error: 'Некорректный статус или комментарий' });
+    }
     const db = getDatabase();
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as any;
@@ -376,14 +339,14 @@ ordersRouter.patch('/orders/:id/status', (req: Request, res: Response) => {
 });
 
 // GET /api/support/tickets — Get support tickets
-ordersRouter.get('/support/tickets', (req: Request, res: Response) => {
+ordersRouter.get('/support/tickets', requireAccount, (req: Request, res: Response) => {
   try {
     const db = getDatabase();
-    const userId = req.query.userId as string;
-    const isOperator = req.query.role === 'operator';
+    const { id: userId, role } = res.locals.account;
+    const isOperator = role === 'operator';
 
     let tickets: any[];
-    if (isOperator || !userId) {
+    if (isOperator) {
       tickets = db.prepare(`
         SELECT t.*, o.order_number
         FROM support_tickets t
@@ -400,54 +363,68 @@ ordersRouter.get('/support/tickets', (req: Request, res: Response) => {
       `).all(userId);
     }
 
-    res.json({ success: true, count: tickets.length, data: tickets });
+    res.json({
+      success: true,
+      count: tickets.length,
+      data: tickets.map(ticket => ({
+        ...ticket,
+        ticketNumber: ticket.ticket_number,
+        orderId: ticket.order_id,
+        orderNumber: ticket.order_number,
+        createdAt: ticket.created_at
+      }))
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // POST /api/support/tickets — Create support ticket for order
-ordersRouter.post('/support/tickets', (req: Request, res: Response) => {
+ordersRouter.post('/support/tickets', requireCustomer, (req: Request, res: Response) => {
   try {
     const db = getDatabase();
-    const { orderId, userId = 'usr-test-customer-001', subject, message } = req.body;
+    const { orderId, subject, message } = req.body;
+    const userId = res.locals.account.id;
 
-    if (!subject || !message) {
-      res.status(400).json({ success: false, error: 'Укажите тему и текст сообщения' });
-      return;
+    if (typeof subject !== 'string' || !subject.trim() ||
+        typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ success: false, error: 'Укажите тему и текст сообщения' });
+    }
+    if (orderId != null && (typeof orderId !== 'string' ||
+        !db.prepare('SELECT 1 FROM orders WHERE id = ? AND user_id = ?').get(orderId, userId))) {
+      return res.status(400).json({ success: false, error: 'Заказ не найден' });
     }
 
-    const ticketId = `tkt-${uuidv4().slice(0, 8)}`;
-    const ticketNum = `TCK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const ticketId = `tkt-${uuidv4()}`;
     const nowIso = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO support_tickets (id, ticket_number, order_id, user_id, subject, message, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(ticketId, ticketNum, orderId || null, userId, subject, message, 'open', nowIso, nowIso);
+    const ticketNum = db.transaction(() => {
+      const { latest } = db.prepare(`
+        SELECT COALESCE(MAX(CAST(SUBSTR(ticket_number, 5) AS INTEGER)), 0) AS latest
+        FROM support_tickets WHERE ticket_number LIKE 'TCK-%'
+      `).get() as { latest: number };
+      const ticketNumber = `TCK-${String(latest + 1).padStart(5, '0')}`;
 
-    // Audit log
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      userId,
-      nowIso,
-      'support:create_ticket',
-      'support_ticket',
-      ticketId,
-      'success',
-      JSON.stringify({ ticketNum, orderId, subject })
-    );
+      db.prepare(`
+        INSERT INTO support_tickets (id, ticket_number, order_id, user_id, subject, message, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)
+      `).run(ticketId, ticketNumber, orderId ?? null, userId, subject.trim(), message.trim(), nowIso, nowIso);
+
+      db.prepare(`
+        INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json)
+        VALUES (?, ?, ?, 'support:create_ticket', 'support_ticket', ?, 'success', ?)
+      `).run(uuidv4(), userId, nowIso, ticketId, JSON.stringify({ ticketNumber, orderId, subject: subject.trim() }));
+
+      return ticketNumber;
+    }).immediate();
 
     res.status(201).json({
       success: true,
-      message: 'Обращение зарегистрировано. Оператор свяжется с вами в течение 15 минут.',
+      message: 'Обращение зарегистрировано.',
       data: {
         id: ticketId,
         ticketNumber: ticketNum,
-        subject,
+        subject: subject.trim(),
         status: 'open',
         createdAt: nowIso
       }
@@ -458,7 +435,7 @@ ordersRouter.post('/support/tickets', (req: Request, res: Response) => {
 });
 
 // GET /api/audit-logs — Operator only audit log
-ordersRouter.get('/audit-logs', (req: Request, res: Response) => {
+ordersRouter.get('/audit-logs', requireOperator, (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const logs = db.prepare(`

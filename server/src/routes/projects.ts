@@ -1,33 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../db/database';
+import { requireAccount } from '../session';
 
 export const projectsRouter = Router();
+projectsRouter.use(['/projects', '/privacy'], requireAccount);
 
-// GET /api/projects — List user projects (or all projects if operator)
+// GET /api/projects — List the current account's projects
 projectsRouter.get('/projects', (req: Request, res: Response) => {
   try {
     const db = getDatabase();
-    const userId = req.query.userId as string || 'usr-test-customer-001';
-    const isOperator = req.query.role === 'operator';
-
-    let projects: any[];
-    if (isOperator) {
-      projects = db.prepare(`
-        SELECT p.*, pr.name as product_name, pr.category as product_category, pr.image_url as product_image_url
-        FROM projects p
-        LEFT JOIN products pr ON p.product_id = pr.id
-        ORDER BY p.updated_at DESC
-      `).all();
-    } else {
-      projects = db.prepare(`
-        SELECT p.*, pr.name as product_name, pr.category as product_category, pr.image_url as product_image_url
-        FROM projects p
-        LEFT JOIN products pr ON p.product_id = pr.id
-        WHERE p.user_id = ? OR p.guest_token = ?
-        ORDER BY p.updated_at DESC
-      `).all(userId, userId);
-    }
+    const projects = db.prepare(`
+      SELECT p.*, pr.name as product_name, pr.category as product_category, pr.image_url as product_image_url
+      FROM projects p
+      LEFT JOIN products pr ON p.product_id = pr.id
+      WHERE p.user_id = ?
+      ORDER BY p.updated_at DESC
+    `).all(res.locals.account.id) as any[];
 
     const formatted = projects.map(p => ({
       id: p.id,
@@ -61,8 +50,8 @@ projectsRouter.get('/projects/:id', (req: Request, res: Response) => {
       SELECT p.*, pr.name as product_name, pr.category as product_category, pr.image_url as product_image_url
       FROM projects p
       LEFT JOIN products pr ON p.product_id = pr.id
-      WHERE p.id = ?
-    `).get(id) as any;
+      WHERE p.id = ? AND p.user_id = ?
+    `).get(id, res.locals.account.id) as any;
 
     if (!p) {
       res.status(404).json({ success: false, error: 'Проект не найден' });
@@ -96,9 +85,8 @@ projectsRouter.get('/projects/:id', (req: Request, res: Response) => {
 projectsRouter.post('/projects', (req: Request, res: Response) => {
   try {
     const db = getDatabase();
+    const { id: userId } = res.locals.account;
     const {
-      userId = 'usr-test-customer-001',
-      guestToken,
       productId,
       variantId,
       title,
@@ -106,47 +94,52 @@ projectsRouter.post('/projects', (req: Request, res: Response) => {
       status = 'draft'
     } = req.body;
 
-    if (!productId) {
-      res.status(400).json({ success: false, error: 'Не указан productId' });
-      return;
+    if (typeof productId !== 'string' || !db.prepare('SELECT 1 FROM products WHERE id = ?').get(productId)) {
+      return res.status(400).json({ success: false, error: 'Товар не найден' });
+    }
+    if (variantId != null && (typeof variantId !== 'string' ||
+        !db.prepare('SELECT 1 FROM product_variants WHERE id = ? AND product_id = ?').get(variantId, productId))) {
+      return res.status(400).json({ success: false, error: 'Вариант не подходит выбранному товару' });
     }
 
     const id = `proj-${uuidv4().slice(0, 8)}`;
     const nowIso = new Date().toISOString();
 
-    const insertStmt = db.prepare(`
-      INSERT INTO projects (
-        id, user_id, guest_token, product_id, variant_id, title, status, settings_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    db.transaction(() => {
+      const insertStmt = db.prepare(`
+        INSERT INTO projects (
+          id, user_id, guest_token, product_id, variant_id, title, status, settings_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    insertStmt.run(
-      id,
-      userId,
-      guestToken || null,
-      productId,
-      variantId || null,
-      title || 'Моя фотокнига PicPac',
-      status,
-      JSON.stringify(document || {}),
-      nowIso,
-      nowIso
-    );
+      insertStmt.run(
+        id,
+        userId,
+        null,
+        productId,
+        variantId || null,
+        title || 'Моя фотокнига PicPac',
+        status,
+        JSON.stringify(document || {}),
+        nowIso,
+        nowIso
+      );
 
-    // Audit log
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      uuidv4(),
-      userId,
-      nowIso,
-      'project:create',
-      'project',
-      id,
-      'success',
-      JSON.stringify({ title, productId })
-    );
+      // Audit log
+      db.prepare(`
+        INSERT INTO audit_logs (id, user_id, timestamp, action, entity_type, entity_id, result, details_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        uuidv4(),
+        userId,
+        nowIso,
+        'project:create',
+        'project',
+        id,
+        'success',
+        JSON.stringify({ title, productId })
+      );
+    })();
 
     res.status(201).json({
       success: true,
@@ -174,7 +167,7 @@ projectsRouter.put('/projects/:id', (req: Request, res: Response) => {
     const db = getDatabase();
     const { title, document, status } = req.body;
 
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(id, res.locals.account.id) as any;
     if (!existing) {
       res.status(404).json({ success: false, error: 'Проект не найден' });
       return;
@@ -211,7 +204,7 @@ projectsRouter.post('/projects/:id/duplicate', (req: Request, res: Response) => 
     const { id } = req.params;
     const db = getDatabase();
 
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(id, res.locals.account.id) as any;
     if (!existing) {
       res.status(404).json({ success: false, error: 'Исходный проект не найден' });
       return;
@@ -258,7 +251,7 @@ projectsRouter.delete('/projects/:id', (req: Request, res: Response) => {
     const { id } = req.params;
     const db = getDatabase();
 
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    const existing = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(id, res.locals.account.id) as any;
     if (!existing) {
       res.status(404).json({ success: false, error: 'Проект не найден' });
       return;
@@ -290,8 +283,7 @@ projectsRouter.delete('/projects/:id', (req: Request, res: Response) => {
 // POST /api/privacy/purge-data — Purge user photos and draft projects (Security & Privacy Law 99-Z)
 projectsRouter.post('/privacy/purge-data', (req: Request, res: Response) => {
   try {
-    const { userId } = req.body;
-    const uid = userId || 'usr-test-customer-001';
+    const uid = res.locals.account.id;
     const db = getDatabase();
 
     // Delete photos linked to user projects

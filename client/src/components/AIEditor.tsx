@@ -29,14 +29,18 @@ import {
 interface AIEditorProps {
   document: PhotobookDocument;
   projectId?: string;
+  price?: number;
+  onRequireAccount?: () => void;
   onSave: (doc: PhotobookDocument) => Promise<void>;
-  onAddToCart: (doc: PhotobookDocument) => void;
+  onAddToCart?: (doc: PhotobookDocument) => void;
   onClose: () => void;
 }
 
 export const AIEditor: React.FC<AIEditorProps> = ({
   document: initialDoc,
   projectId,
+  price,
+  onRequireAccount,
   onSave,
   onAddToCart,
   onClose
@@ -294,7 +298,7 @@ export const AIEditor: React.FC<AIEditorProps> = ({
     setIsSaving(true);
     try {
       await onSave(doc);
-      setSaveSuccessMsg('Проект автоматически сохранен');
+      setSaveSuccessMsg('Проект сохранён');
       setTimeout(() => setSaveSuccessMsg(null), 3000);
     } catch (err: any) {
       alert('Ошибка сохранения: ' + err.message);
@@ -309,7 +313,7 @@ export const AIEditor: React.FC<AIEditorProps> = ({
     if (issues.length > 0) {
       setIsPreFlightOpen(true);
     } else {
-      onAddToCart(doc);
+      onAddToCart?.(doc);
     }
   };
 
@@ -338,7 +342,7 @@ export const AIEditor: React.FC<AIEditorProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-1.5">
+          {!onRequireAccount && <div className="flex items-center space-x-1.5">
             {/* Undo Button */}
             <button
               type="button"
@@ -375,7 +379,7 @@ export const AIEditor: React.FC<AIEditorProps> = ({
               <Save className="w-3.5 h-3.5" />
               <span>{isSaving ? '...' : 'Сохранить'}</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Save / Layout toast */}
@@ -616,8 +620,14 @@ export const AIEditor: React.FC<AIEditorProps> = ({
           </div>
         </div>
 
-        {/* BOTTOM ACTION & SMART TOOLBAR */}
-        <div className="bg-white border-t border-[#EDE1D5] p-3.5 space-y-3 craft-shadow">
+        {onRequireAccount ? (
+          <div className="space-y-2 border-t border-[#EDE1D5] bg-white p-4 text-center">
+            <p className="text-xs text-[#596c67]">Войдите, чтобы редактировать и сохранить макет или оформить заказ.</p>
+            <button type="button" onClick={onRequireAccount} className="w-full rounded-xl bg-[#B83D3D] px-4 py-2.5 text-sm font-bold text-white">
+              Войти для сохранения
+            </button>
+          </div>
+        ) : <div className="bg-white border-t border-[#EDE1D5] p-3.5 space-y-3 craft-shadow">
           {/* Tool actions: Smart Auto-Layout + AI Chat Toggle */}
           <div className="flex items-center justify-between space-x-2">
             {/* Smart Auto-Layout Button (KILLER FEATURE) */}
@@ -684,13 +694,13 @@ export const AIEditor: React.FC<AIEditorProps> = ({
           )}
 
           {/* Primary CTA: Add to cart with pre-flight guarantee */}
-          <div className="flex items-center justify-between pt-1">
-            <div>
+          {onAddToCart && <div className="flex items-center justify-between pt-1">
+            {price !== undefined && <div>
               <span className="text-[11px] text-[#7A8C88] block">Итого за фотокнигу:</span>
               <span className="text-base font-black text-[#DD5757]">
-                38.99 BYN
+                {price.toFixed(2)} BYN
               </span>
-            </div>
+            </div>}
 
             <button
               type="button"
@@ -700,18 +710,18 @@ export const AIEditor: React.FC<AIEditorProps> = ({
               <ShoppingBag className="w-4 h-4" />
               <span>В корзину →</span>
             </button>
-          </div>
-        </div>
+          </div>}
+        </div>}
 
       </div>
 
       {/* PRE-FLIGHT VALIDATOR MODAL (KILLER FEATURE 3) */}
-      {isPreFlightOpen && (
+      {isPreFlightOpen && !onRequireAccount && (
         <PreFlightModal
           document={doc}
           onProceedAnyway={() => {
             setIsPreFlightOpen(false);
-            onAddToCart(doc);
+            onAddToCart?.(doc);
           }}
           onFixIssues={() => setIsPreFlightOpen(false)}
           onClose={() => setIsPreFlightOpen(false)}

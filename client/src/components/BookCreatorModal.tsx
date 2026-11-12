@@ -1,3 +1,4 @@
+import { readPhoto } from '../services/photos';
 import React, { useState } from 'react';
 import { Product, PhotobookDocument } from '../types';
 import { generateBookAI } from '../services/api';
@@ -23,7 +24,7 @@ interface BookCreatorModalProps {
   products: Product[];
   selectedProduct?: Product;
   onClose: () => void;
-  onBookGenerated: (doc: PhotobookDocument, product: Product) => void;
+  onBookGenerated: (doc: PhotobookDocument, productId: string, variantId: string) => void;
 }
 
 export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
@@ -38,10 +39,8 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
   );
   const [step, setStep] = useState<number>(1); // 1 = params, 2 = photos, 3 = styling, 4 = generating
 
-  // Step 1: Parameters
-  const [selectedFormat, setSelectedFormat] = useState<string>('20 × 20 см');
-  const [selectedPages, setSelectedPages] = useState<number>(20);
-  const [selectedCover, setSelectedCover] = useState<string>('Твёрдая фотообложка (Soft-Touch)');
+  const [variantId, setVariantId] = useState(selectedProduct.variants[0]?.id);
+  const selectedVariant = selectedProduct.variants.find(variant => variant.id === variantId);
 
   // Step 2: Photos presets & uploads
   const samplePhotoPresets = [
@@ -74,7 +73,7 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
   ];
 
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>(samplePhotoPresets[0].photos);
-  const [photoValidationMsg, setPhotoValidationMsg] = useState<string>('Все 8 фото проверены: высокое разрешение, дубликатов нет');
+  const [photoValidationMsg, setPhotoValidationMsg] = useState<string>('Выбрана тестовая галерея');
 
   // Step 3: Theme & Style
   const themes = [
@@ -100,6 +99,7 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
   ];
 
   const handleStartGeneration = async () => {
+    if (!selectedVariant) return;
     setStep(4);
     setGenStepIdx(0);
 
@@ -116,15 +116,16 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
         photos: selectedPhotos,
         theme: selectedTheme,
         style: selectedStyle,
-        format: selectedFormat,
-        coverType: selectedCover,
+        format: selectedVariant.attributes.size ?? selectedVariant.name,
+        coverType: selectedVariant.attributes.cover,
+        pages: selectedVariant.attributes.pages,
         title: bookTitle,
         customPrompt
       });
 
       setTimeout(() => {
         clearInterval(interval);
-        onBookGenerated(generatedDoc, selectedProduct);
+        onBookGenerated(generatedDoc, selectedProduct.id, selectedVariant.id);
       }, 2600);
     } catch (err: any) {
       clearInterval(interval);
@@ -133,15 +134,16 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const newUrls: string[] = [];
-      for (let i = 0; i < e.target.files.length; i++) {
-        const file = e.target.files[i];
-        newUrls.push(URL.createObjectURL(file));
-      }
-      setSelectedPhotos(prev => [...prev, ...newUrls]);
-      setPhotoValidationMsg(`Загружено ${selectedPhotos.length + newUrls.length} фото. Формат и разрешение соответствуют стандартам.`);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    try {
+      const photos = await Promise.all(files.map(readPhoto));
+      setSelectedPhotos(photos);
+      setPhotoValidationMsg(`Выбрано фото: ${photos.length}`);
+    } catch (error) {
+      setPhotoValidationMsg((error as Error).message);
     }
   };
 
@@ -160,7 +162,7 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
                 Создание фотокниги с ИИ
               </h2>
               <p className="text-[11px] text-[#7C807F]">
-                Шаг {step} из 3 • {step === 1 ? 'Параметры' : step === 2 ? 'Загрузка фото' : step === 3 ? 'Стиль и тема' : 'Генерация'}
+                {step === 4 ? 'Создание макета' : `Шаг ${step} из 3 • ${['Параметры', 'Загрузка фото', 'Стиль и тема'][step - 1]}`}
               </p>
             </div>
           </div>
@@ -193,7 +195,10 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
                       <button
                         key={p.id}
                         type="button"
-                        onClick={() => setSelectedProduct(p)}
+                        onClick={() => {
+                          setSelectedProduct(p);
+                          setVariantId(p.variants[0]?.id);
+                        }}
                         className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all cursor-pointer ${
                           isSelected
                             ? 'bg-white border-[#DD5757] shadow-sm'
@@ -227,52 +232,25 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
                 </div>
               </div>
 
-              {/* Format selection */}
               <div>
-                <label className="text-xs font-bold text-[#364C49] uppercase tracking-wider block mb-1.5">
-                  Формат книги:
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {['20 × 20 см', '20 × 30 см', '30 × 30 см'].map(fmt => (
+                <span className="text-xs font-bold text-[#364C49] uppercase tracking-wider block mb-1.5">
+                  Комплектация
+                </span>
+                <div className="grid gap-2">
+                  {selectedProduct.variants.map(variant => (
                     <button
-                      key={fmt}
+                      key={variant.id}
                       type="button"
-                      onClick={() => setSelectedFormat(fmt)}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
-                        selectedFormat === fmt
-                          ? 'bg-[#364C49] text-white border-[#364C49] shadow-xs'
-                          : 'bg-white text-[#364C49] border-[#BCBFB7]/60 hover:bg-[#F6EFE6]'
-                      }`}
+                      aria-pressed={variant.id === variantId}
+                      onClick={() => setVariantId(variant.id)}
+                      className={`p-3 rounded-xl border text-left text-xs flex items-center justify-between gap-3
+                        ${variant.id === variantId ? 'bg-[#364C49] border-[#364C49] text-white' : 'bg-white border-[#BCBFB7]/60 text-[#364C49]'}`}
                     >
-                      {fmt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Pages selection */}
-              <div>
-                <label className="text-xs font-bold text-[#364C49] uppercase tracking-wider block mb-1.5">
-                  Объём книги (страниц):
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { pages: 20, spreads: '10 разворотов' },
-                    { pages: 30, spreads: '15 разворотов' },
-                    { pages: 40, spreads: '20 разворотов' }
-                  ].map(opt => (
-                    <button
-                      key={opt.pages}
-                      type="button"
-                      onClick={() => setSelectedPages(opt.pages)}
-                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
-                        selectedPages === opt.pages
-                          ? 'bg-[#364C49] text-white border-[#364C49] shadow-xs'
-                          : 'bg-white text-[#364C49] border-[#BCBFB7]/60 hover:bg-[#F6EFE6]'
-                      }`}
-                    >
-                      <span className="text-sm font-extrabold block">{opt.pages} стр.</span>
-                      <span className="text-[10px] opacity-80 block">{opt.spreads}</span>
+                      <span>
+                        <strong className="block">{variant.name}</strong>
+                        {variant.attributes.cover}
+                      </span>
+                      <strong className="shrink-0">{variant.totalPrice.toFixed(2)} BYN</strong>
                     </button>
                   ))}
                 </div>
@@ -326,7 +304,7 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
                       type="button"
                       onClick={() => {
                         setSelectedPhotos(preset.photos);
-                        setPhotoValidationMsg(`Выбрано ${preset.photos.length} фото. Все проверены.`);
+                        setPhotoValidationMsg(`Выбрано фото: ${preset.photos.length}`);
                       }}
                       className="p-2.5 rounded-xl border bg-white border-[#BCBFB7]/60 hover:border-[#364C49] text-left text-xs font-semibold text-[#364C49] flex items-center justify-between"
                     >
@@ -527,9 +505,9 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
               </button>
             ) : (
               <div>
-                <span className="text-[11px] text-[#7C807F] block">Стоимость от</span>
+                <span className="text-[11px] text-[#7C807F] block">Стоимость</span>
                 <span className="text-sm font-extrabold text-[#364C49]">
-                  {selectedProduct.basePrice.toFixed(2)} BYN
+                  {(selectedVariant?.totalPrice ?? selectedProduct.basePrice).toFixed(2)} BYN
                 </span>
               </div>
             )}
@@ -538,7 +516,7 @@ export const BookCreatorModal: React.FC<BookCreatorModalProps> = ({
               <button
                 type="button"
                 onClick={() => setStep(step + 1)}
-                disabled={step === 2 && selectedPhotos.length === 0}
+                disabled={!selectedVariant || (step === 2 && selectedPhotos.length === 0)}
                 className="px-5 py-2.5 rounded-xl bg-[#364C49] hover:bg-[#283836] text-white text-xs font-bold flex items-center space-x-1 cursor-pointer"
               >
                 <span>Далее</span>

@@ -3,11 +3,15 @@ import { Home, Sparkles, BookOpen, Layers, User } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
+  isGuest: boolean;
+  isOperator: boolean;
   onTabChange: (tab: string) => void;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
+  isGuest,
+  isOperator,
   onTabChange
 }) => {
   const tabs = [
@@ -15,12 +19,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     { id: 'ideas', label: 'Пикпаки', icon: Sparkles, badge: 'NEW' },
     { id: 'catalog', label: 'Каталог', icon: BookOpen },
     { id: 'projects', label: 'Макеты', icon: Layers },
-    { id: 'profile', label: 'Профиль', icon: User }
-  ];
+    { id: 'profile', label: isOperator ? 'Оператор' : 'Профиль', icon: User }
+  ].filter(tab => !isGuest || (tab.id !== 'projects' && tab.id !== 'profile'));
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#EDE1D5] shadow-lg pb-safe">
-      <div className="max-w-md mx-auto grid grid-cols-5 h-16">
+      <div className={`max-w-md mx-auto grid h-16 ${isGuest ? 'grid-cols-3' : 'grid-cols-5'}`}>
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

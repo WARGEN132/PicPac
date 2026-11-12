@@ -79,18 +79,32 @@
 
 ---
 
-## 3. Запланированные эндпоинты Этапа 2
+## 3. Проекты и заказы
 
-- `POST /api/auth/login` — вход по email и паролю, выдача JWT токена
-- `GET /api/auth/me` — получение данных текущего пользователя и роли
-- `POST /api/projects` — создание нового проекта (черновика)
-- `GET /api/projects/:id` — получение черновика проекта со всеми фото
-- `PUT /api/projects/:id` — автосохранение настроек проекта
-- `POST /api/photos/upload` — загрузка фотографий (multipart/form-data)
-- `DELETE /api/photos/:id` — удаление фотографии
-- `POST /api/orders` — оформление заказа с заголовком `Idempotency-Key`
-- `GET /api/orders` — список заказов текущего пользователя (или всех для оператора)
-- `GET /api/orders/:id` — статусная лента и детали заказа
-- `PATCH /api/orders/:id/status` — смена статуса оператором (с фиксацией в истории)
-- `POST /api/support/tickets` — создание обращения в поддержку по заказу
-- `GET /api/audit-logs` — журнал действий (доступен роли `operator`)
+Для доступа к макетам, заказам и обращениям браузер передаёт cookie сессии
+`picpac_session`. Сервер определяет владельца и роль по сессии.
+
+- `POST /api/auth/login` — вход по email и паролю.
+- `POST /api/auth/register` — регистрация покупателя по имени, email и паролю
+  от 8 символов. Телефон и адрес необязательны.
+- `POST /api/auth/anonymous` — гостевая сессия для каталога и предпросмотра.
+- `GET /api/auth/me` — профиль текущей сессии или `{ "user": null }`.
+- `POST /api/auth/logout` — завершение текущей сессии.
+- `POST /api/projects` — создание черновика с `productId`, необязательным `variantId` и макетом `document`.
+- `GET /api/projects/:id` — получение сохранённого макета.
+- `PUT /api/projects/:id` — обновление макета.
+- `POST /api/orders/quote` — расчёт стоимости без создания заказа. Передайте
+  `items` с полями `productId`, `quantity` и необязательным `variantId`.
+  Можно добавить `promoCode` и `deliveryMethod`. Ответ содержит `subtotal`,
+  `discountAmount`, `deliveryAmount`, `totalAmount` и `promoError`.
+- `POST /api/orders` — оформление заказа с заголовком `Idempotency-Key`.
+  Сервер рассчитывает цены по каталогу. Повтор того же запроса с тем же ключом
+  возвращает созданный заказ. Повторное использование ключа для другого заказа
+  возвращает HTTP 409.
+- `GET /api/orders` — список заказов.
+- `GET /api/orders/:id` — детали и история статусов по ID или номеру заказа.
+- `PATCH /api/orders/:id/status` — изменение статуса и запись в истории.
+- `POST /api/support/tickets` — создание обращения в поддержку.
+- `GET /api/audit-logs` — журнал действий в демо.
+
+Поддерживаемые коды доставки и формулы описаны в [расчёте стоимости](pricing_formula.md).

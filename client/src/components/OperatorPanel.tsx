@@ -34,8 +34,8 @@ export const OperatorPanel: React.FC<OperatorPanelProps> = ({ onExit }) => {
     setIsLoading(true);
     try {
       const [ordersData, ticketsData, logsData] = await Promise.all([
-        fetchOrders('usr-test-operator-001', true),
-        fetchTickets(undefined, true),
+        fetchOrders(),
+        fetchTickets(),
         fetchAuditLogs()
       ]);
       setOrders(ordersData);

@@ -1,20 +1,23 @@
+import { readPhoto } from '../services/photos';
 import React, { useState } from 'react';
 import { Product, ProductVariant, CartItem } from '../types';
 import { X, Upload, Plus, Minus, Check, ShoppingBag, Image as ImageIcon, ShieldCheck } from 'lucide-react';
 
 interface PrintsOrderModalProps {
   products: Product[];
+  initialProduct: Product;
   onClose: () => void;
   onAddToCart: (item: CartItem) => void;
 }
 
 export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
   products,
+  initialProduct,
   onClose,
   onAddToCart
 }) => {
-  const printsProducts = products.filter(p => p.category.includes('photo_') || p.category.includes('prints'));
-  const [selectedProduct, setSelectedProduct] = useState<Product>(printsProducts[0] || products[0]);
+  const printsProducts = products.filter(p => p.category === 'prints' && p.variants.length > 0);
+  const [selectedProduct, setSelectedProduct] = useState<Product>(initialProduct);
   
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant>(
     selectedProduct.variants[0]
@@ -28,6 +31,8 @@ export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
     { id: '3', url: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=600&q=80', count: 3 },
     { id: '4', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80', count: 1 }
   ]);
+
+  const [usingSamplePhotos, setUsingSamplePhotos] = useState(true);
 
   const unitPrice = selectedVariant.totalPrice || selectedProduct.basePrice;
   const totalPrintsCount = photos.reduce((acc, p) => acc + p.count, 0);
@@ -44,14 +49,17 @@ export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
     );
   };
 
-  const handleUploadNewPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const newItems = Array.from(e.target.files).map((file, i) => ({
-        id: `upload-${Date.now()}-${i}`,
-        url: URL.createObjectURL(file),
-        count: 1
-      }));
-      setPhotos(prev => [...prev, ...newItems]);
+  const handleUploadNewPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    try {
+      const urls = await Promise.all(files.map(readPhoto));
+      const uploaded = urls.map((url, index) => ({ id: `upload-${Date.now()}-${index}`, url, count: 1 }));
+      setPhotos(previous => usingSamplePhotos ? uploaded : [...previous, ...uploaded]);
+      setUsingSamplePhotos(false);
+    } catch (error) {
+      alert((error as Error).message);
     }
   };
 
@@ -67,6 +75,7 @@ export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
       unitPrice,
       totalPrice,
       type: 'prints',
+      photos: photos.map(({ url, count }) => ({ url, count })),
       details: {
         photosCount: photos.length,
         printsCount: totalPrintsCount,
@@ -90,7 +99,7 @@ export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
               Заказ фотопечати
             </h2>
             <p className="text-[11px] text-[#7C807F]">
-              Прямой сценарий заказа без AI-редактора
+              Загрузите свои фото или используйте демонстрационный набор
             </p>
           </div>
           <button
@@ -201,7 +210,7 @@ export const PrintsOrderModal: React.FC<PrintsOrderModalProps> = ({
               </span>
               <label className="text-xs font-bold text-[#DD5757] hover:underline cursor-pointer flex items-center space-x-1">
                 <Upload className="w-3.5 h-3.5" />
-                <span>+ Добавить фото</span>
+                <span>{usingSamplePhotos ? 'Загрузить свои фото' : '+ Добавить фото'}</span>
                 <input type="file" multiple accept="image/*" onChange={handleUploadNewPhotos} className="hidden" />
               </label>
             </div>

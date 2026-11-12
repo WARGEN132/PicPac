@@ -1,4 +1,5 @@
-import { Product, Project, Order, SupportTicket, PhotobookDocument, AuthUser } from '../types';
+import type { OrderLine } from '../../../shared/checkout';
+import { Product, Project, Order, SupportTicket, PhotobookDocument, AuthUser, OrderQuote, CreatedOrder } from '../types';
 
 const API_BASE = '/api';
 
@@ -15,8 +16,8 @@ export async function fetchProducts(): Promise<Product[]> {
   return json.data;
 }
 
-export async function fetchProjects(userId: string, isOperator = false): Promise<Project[]> {
-  const res = await fetch(`${API_BASE}/projects?userId=${encodeURIComponent(userId)}${isOperator ? '&role=operator' : ''}`);
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch(`${API_BASE}/projects`);
   if (!res.ok) throw new Error('Ошибка загрузки проектов');
   const json = await res.json();
   return json.data;
@@ -68,7 +69,8 @@ export async function generateBookAI(params: {
   theme: string;
   style: string;
   format: string;
-  coverType: string;
+  coverType?: string;
+  pages?: number;
   title: string;
   customPrompt?: string;
 }): Promise<PhotobookDocument> {
@@ -101,8 +103,8 @@ export async function sendAIEditCommand(params: {
   };
 }
 
-export async function fetchOrders(userId: string, isOperator = false): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders?userId=${encodeURIComponent(userId)}${isOperator ? '&role=operator' : ''}`);
+export async function fetchOrders(): Promise<Order[]> {
+  const res = await fetch(`${API_BASE}/orders`);
   if (!res.ok) throw new Error('Ошибка загрузки заказов');
   const json = await res.json();
   return json.data;
@@ -115,7 +117,21 @@ export async function fetchOrderById(id: string): Promise<Order> {
   return json.data;
 }
 
-export async function createOrder(orderData: any, idempotencyKey?: string): Promise<{ id: string; orderNumber: string; totalAmount: number }> {
+export async function quoteOrder(items: OrderLine[], promoCode: string, signal: AbortSignal): Promise<OrderQuote> {
+  const res = await fetch(`${API_BASE}/orders/quote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({ items: items.map(({ productId, variantId, quantity }) => ({
+      productId, variantId, quantity
+    })), promoCode })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Ошибка расчёта заказа');
+  return json.data;
+}
+
+export async function createOrder(orderData: object, idempotencyKey?: string): Promise<CreatedOrder> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (idempotencyKey) {
     headers['Idempotency-Key'] = idempotencyKey;
@@ -133,24 +149,23 @@ export async function createOrder(orderData: any, idempotencyKey?: string): Prom
   return json.data;
 }
 
-export async function updateOrderStatus(orderId: string, status: string, comment = '', operatorUserId = 'usr-test-operator-001'): Promise<void> {
+export async function updateOrderStatus(orderId: string, status: string, comment = ''): Promise<void> {
   const res = await fetch(`${API_BASE}/orders/${orderId}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status, comment, operatorUserId })
+    body: JSON.stringify({ status, comment })
   });
   if (!res.ok) throw new Error('Ошибка смены статуса');
 }
 
-export async function fetchTickets(userId?: string, isOperator = false): Promise<SupportTicket[]> {
-  const url = `${API_BASE}/support/tickets?${isOperator ? 'role=operator' : `userId=${encodeURIComponent(userId || '')}`}`;
-  const res = await fetch(url);
+export async function fetchTickets(): Promise<SupportTicket[]> {
+  const res = await fetch(`${API_BASE}/support/tickets`);
   if (!res.ok) throw new Error('Ошибка загрузки обращений');
   const json = await res.json();
   return json.data;
 }
 
-export async function createTicket(ticketData: { orderId?: string; userId: string; subject: string; message: string }): Promise<any> {
+export async function createTicket(ticketData: { orderId?: string; subject: string; message: string }): Promise<any> {
   const res = await fetch(`${API_BASE}/support/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -167,11 +182,9 @@ export async function fetchAuditLogs(): Promise<any[]> {
   return json.data;
 }
 
-export async function purgeUserData(userId: string): Promise<string> {
+export async function purgeUserData(): Promise<string> {
   const res = await fetch(`${API_BASE}/privacy/purge-data`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId })
+    method: 'POST'
   });
   if (!res.ok) throw new Error('Ошибка удаления данных');
   const json = await res.json();
@@ -198,7 +211,6 @@ export async function registerUser(data: {
   name: string;
   phone?: string;
   address?: string;
-  role?: 'customer' | 'operator';
 }): Promise<AuthUser> {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
@@ -223,11 +235,13 @@ export async function loginAnonymous(): Promise<AuthUser> {
   return json.user;
 }
 
-export async function fetchTestUsers(): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/auth/test-users`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  return json.accounts || [];
+export async function fetchSession(signal: AbortSignal): Promise<AuthUser | null> {
+  const res = await fetch(`${API_BASE}/auth/me`, { signal });
+  if (!res.ok) throw new Error('Не удалось проверить вход');
+  return (await res.json()).user;
 }
 
-
+export async function logoutUser(): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+  if (!res.ok) throw new Error('Не удалось выйти из аккаунта');
+}

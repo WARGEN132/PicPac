@@ -1,3 +1,4 @@
+import { deliveryOptions } from '../../../shared/checkout';
 import React, { useState } from 'react';
 import { Order, AuthUser } from '../types';
 import { purgeUserData } from '../services/api';
@@ -10,8 +11,6 @@ import {
   Copy,
   Check,
   ShieldCheck,
-  Lock,
-  CreditCard,
   Trash2,
   PhoneCall,
   MapPin,
@@ -21,49 +20,41 @@ import {
   Bell,
   User,
   Shield,
-  Edit2,
-  LogIn
+  Edit2
 } from 'lucide-react';
 
 interface DeliveryTrackerProps {
   orders: Order[];
-  currentUserId: string;
+  currentUser: AuthUser;
   onOpenSupport: (order: Order) => void;
   onRefresh: () => void;
-  isOperator?: boolean;
-  onToggleOperator?: () => void;
-  currentUser?: AuthUser | null;
-  onOpenAuth?: () => void;
 }
 
 const STEPS = [
   { id: 'received', label: 'Принят', icon: Clock },
-  { id: 'in_production', label: 'В печати', icon: Printer },
-  { id: 'ready', label: 'Готов', icon: PackageCheck },
-  { id: 'shipping', label: 'В пути', icon: Truck },
-  { id: 'completed', label: 'Доставлен', icon: CheckCircle2 }
+  { id: 'moderation', label: 'На проверке', icon: Shield },
+  { id: 'production', label: 'В печати', icon: Printer },
+  { id: 'ready_for_delivery', label: 'Готов к выдаче', icon: PackageCheck },
+  { id: 'completed', label: 'Завершён', icon: CheckCircle2 }
 ];
+
+function statusLabel(status: Order['status']) {
+  return status === 'cancelled' ? 'Отменён' : STEPS.find(step => step.id === status)?.label;
+}
 
 export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
   orders,
-  currentUserId,
-  onOpenSupport,
-  onRefresh,
-  isOperator = false,
-  onToggleOperator,
   currentUser,
-  onOpenAuth
+  onOpenSupport,
+  onRefresh
 }) => {
   const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[0]?.id || '');
   const [copiedTrack, setCopiedTrack] = useState<boolean>(false);
   const [isPurging, setIsPurging] = useState<boolean>(false);
   const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
 
-  // User details & settings state (from auth or defaults)
-  const userName = currentUser?.name || 'Иван Радкевич';
-  const userPhone = currentUser?.phone || '+375 (29) 123-45-67';
-  const userEmail = currentUser?.email || 'customer@test.by';
-  const [userAddress, setUserAddress] = useState<string>(currentUser?.address || 'г. Минск, пр-т Победителей, 10, кв. 42');
+  const { name: userName, phone: userPhone, email: userEmail } = currentUser;
+  const [userAddress, setUserAddress] = useState(currentUser.address ?? '');
   const [isEditingAddress, setIsEditingAddress] = useState<boolean>(false);
   const [smsNotifications, setSmsNotifications] = useState<boolean>(true);
   const [autoPurgePhotos, setAutoPurgePhotos] = useState<boolean>(true);
@@ -71,20 +62,9 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
   // Active order to inspect
   const activeOrder = orders.find(o => o.id === selectedOrderId) || orders[0];
 
-  // Helper to determine step index
-  const getStepIndex = (status: string) => {
-    switch (status) {
-      case 'received': return 0;
-      case 'moderation': return 0;
-      case 'in_production': return 1;
-      case 'ready': return 2;
-      case 'shipping': return 3;
-      case 'completed': return 4;
-      default: return 1;
-    }
-  };
-
-  const currentStepIdx = activeOrder ? getStepIndex(activeOrder.status) : 3;
+  const currentStepIdx = STEPS.findIndex(step => step.id === activeOrder?.status);
+  const isCancelled = activeOrder?.status === 'cancelled';
+  const delivery = deliveryOptions.find(option => option.id === activeOrder?.deliveryMethod);
 
   const handleCopyTrack = (trackCode: string) => {
     navigator.clipboard.writeText(trackCode);
@@ -93,12 +73,12 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
   };
 
   const handlePurgeData = async () => {
-    if (!confirm('Вы уверены? Это действие безвозвратно удалит все ваши временные фотографии и черновики с серверов лаборатории в соответствии с Законом РБ № 99-З.')) {
+    if (!confirm('Удалить фотографии и черновики из приложения? Это действие нельзя отменить.')) {
       return;
     }
     try {
       setIsPurging(true);
-      const msg = await purgeUserData(currentUserId);
+      const msg = await purgeUserData();
       setPurgeMessage(msg);
       setTimeout(() => {
         setPurgeMessage(null);
@@ -130,29 +110,13 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
               <h2 className="font-extrabold text-base text-[#364C49] leading-tight font-comfortaa">
                 {userName}
               </h2>
-              {currentUser?.role === 'guest' && (
-                <span className="text-[10px] font-bold bg-[#EDE1D5] text-[#364C49] px-2 py-0.2 rounded-full">
-                  Гость
-                </span>
-              )}
             </div>
             <p className="text-xs text-[#7A8C88] mt-0.5">
-              {userPhone} • {userEmail}
+              {[userPhone, userEmail].filter(Boolean).join(' • ')}
             </p>
           </div>
         </div>
 
-        {onOpenAuth && (
-          <button
-            type="button"
-            onClick={onOpenAuth}
-            className="flex items-center space-x-1 px-3 py-1.5 rounded-full bg-[#F6EFE6] hover:bg-[#EDE1D5] text-[#364C49] font-bold text-xs border border-[#EDE1D5] cursor-pointer transition-all"
-            title="Войти под другим пользователем или зарегистрироваться в БД"
-          >
-            <LogIn className="w-3.5 h-3.5 text-[#DD5757]" />
-            <span className="text-[11px]">Аккаунт</span>
-          </button>
-        )}
       </div>
 
       {/* 2. MAIN ACTIVE ORDER DELIVERY PIPELINE */}
@@ -169,36 +133,13 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
               </h3>
             </div>
 
-            {/* High-Contrast Clear Status Badge */}
-            <div className={`px-3.5 py-1.5 rounded-2xl font-black text-xs flex items-center space-x-1.5 shadow-xs ${
-              currentStepIdx === 4
-                ? 'bg-emerald-600 text-white'
-                : currentStepIdx === 3
-                ? 'bg-[#DD5757] text-white animate-pulse'
-                : currentStepIdx === 2
-                ? 'bg-amber-600 text-white'
-                : 'bg-[#364C49] text-white'
-            }`}>
-              {currentStepIdx === 4 && <CheckCircle2 className="w-4 h-4" />}
-              {currentStepIdx === 3 && <Truck className="w-4 h-4" />}
-              {currentStepIdx === 2 && <PackageCheck className="w-4 h-4" />}
-              {currentStepIdx < 2 && <Printer className="w-4 h-4" />}
-              <span>
-                {currentStepIdx === 4
-                  ? 'ДОСТАВЛЕН В ПУНКТ'
-                  : currentStepIdx === 3
-                  ? 'ТОВАР В ПУТИ'
-                  : currentStepIdx === 2
-                  ? 'ГОТОВ К ОТПРАВКЕ'
-                  : currentStepIdx === 1
-                  ? 'В ПЕЧАТИ'
-                  : 'ПРИНЯТ В РАБОТУ'}
-              </span>
-            </div>
+            <span className={`px-3 py-2 rounded-2xl font-bold text-xs text-white
+              ${isCancelled ? 'bg-red-700' : activeOrder.status === 'completed' ? 'bg-emerald-600' : 'bg-[#364C49]'}`}>
+              {statusLabel(activeOrder.status)}
+            </span>
           </div>
 
-          {/* 5-STEP VISUAL PIPELINE */}
-          <div className="pt-1">
+          {!isCancelled && <div className="pt-1">
             <div className="relative">
               {/* Background Connecting Line */}
               <div className="absolute top-4 left-6 right-6 h-1 bg-[#F6EFE6] -z-0">
@@ -246,50 +187,35 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
                 })}
               </div>
             </div>
-          </div>
+          </div>}
 
-          {/* ETA & Address Box */}
+          {/* Address and tracking */}
           <div className="bg-[#F6EFE6] rounded-2xl p-4 space-y-3 text-xs border border-[#BCBFB7]/40">
             <div className="flex items-start space-x-2.5">
               <MapPin className="w-4 h-4 text-[#DD5757] shrink-0 mt-0.5" />
               <div>
                 <span className="font-extrabold text-[#364C49] block text-xs">
-                  {activeOrder.deliveryMethod === 'courier' ? 'Курьерская доставка по адресу' : 'Пункт выдачи Европочта'}
+                  {delivery?.name ?? 'Доставка'}
                 </span>
                 <span className="text-[#7C807F] text-xs mt-0.5 block">
-                  {activeOrder.deliveryAddress || userAddress}
+                  {activeOrder.deliveryAddress || (activeOrder.deliveryMethod === 'pickup_minsk' ? 'Адрес уточняется' : 'Адрес не указан')}
                 </span>
               </div>
             </div>
 
-            {/* Tracking Code */}
-            <div className="flex items-center justify-between pt-2 border-t border-[#BCBFB7]/30">
-              <span className="text-[#7C807F] text-xs">Трек-номер:</span>
-              <button
-                type="button"
-                onClick={() => handleCopyTrack(activeOrder.trackingNumber || `EP-${activeOrder.orderNumber}-BY`)}
-                className="flex items-center space-x-1.5 font-mono font-bold text-xs text-[#364C49] bg-white px-3 py-1.5 rounded-xl border border-[#BCBFB7]/60 hover:border-[#364C49] transition-all cursor-pointer shadow-2xs"
-              >
-                <span>{activeOrder.trackingNumber || `EP-${activeOrder.orderNumber}-BY`}</span>
-                {copiedTrack ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5 text-[#7C807F]" />
-                )}
-              </button>
-            </div>
-
-            {/* Expected Delivery Date */}
-            <div className="flex items-center justify-between text-xs pt-1 border-t border-[#BCBFB7]/20">
-              <span className="text-[#7C807F]">Ожидаемое получение:</span>
-              <span className="font-bold text-[#364C49]">
-                {currentStepIdx === 4
-                  ? 'Готов к выдаче (срок хранения 10 дней)'
-                  : currentStepIdx === 3
-                  ? 'Завтра, 12:00 – 16:00'
-                  : 'Через 2 рабочих дня'}
-              </span>
-            </div>
+            {activeOrder.trackingNumber && (
+              <div className="flex items-center justify-between pt-2 border-t border-[#BCBFB7]/30">
+                <span className="text-[#7C807F] text-xs">Трек-номер</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyTrack(activeOrder.trackingNumber!)}
+                  className="flex items-center gap-1.5 font-mono font-bold text-[#364C49] bg-white px-3 py-1.5 rounded-xl"
+                >
+                  {activeOrder.trackingNumber}
+                  {copiedTrack ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Quick Actions */}
@@ -327,7 +253,7 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
           <div className="space-y-2">
             {orders.map(order => {
               const isSelected = order.id === (activeOrder?.id);
-              const stepIdx = getStepIndex(order.status);
+              const isCompleted = order.status === 'completed';
 
               return (
                 <div
@@ -341,9 +267,9 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
                 >
                   <div className="flex items-center space-x-3">
                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white ${
-                      stepIdx === 4 ? 'bg-emerald-600' : 'bg-[#364C49]'
+                      isCompleted ? 'bg-emerald-600' : 'bg-[#364C49]'
                     }`}>
-                      {stepIdx === 4 ? <CheckCircle2 className="w-4 h-4" /> : <Truck className="w-4 h-4" />}
+                      {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : <Truck className="w-4 h-4" />}
                     </div>
                     <div>
                       <div className="flex items-center space-x-2">
@@ -355,9 +281,7 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
                         </span>
                       </div>
                       <span className="text-xs font-bold text-[#DD5757] block mt-0.5">
-                        {order.totalAmount.toFixed(2)} BYN • {
-                          stepIdx === 4 ? 'Доставлен' : stepIdx === 3 ? 'В пути' : 'В работе'
-                        }
+                        {order.totalAmount.toFixed(2)} BYN • {statusLabel(order.status)}
                       </span>
                     </div>
                   </div>
@@ -440,45 +364,12 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
         </div>
       </div>
 
-      {/* 5. SECURITY & DATA PROTECTION (Section 2 & Law 99-Z) */}
       <div className="bg-white rounded-3xl p-5 border border-[#BCBFB7]/40 shadow-xs space-y-4">
-        <div className="flex items-center space-x-2">
-          <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
-            <ShieldCheck className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="font-extrabold text-sm text-[#364C49]">
-              Безопасность и защита данных
-            </h3>
-            <p className="text-[11px] text-[#7C807F]">
-              ООО «Фотопринт» • Соответствие Закону РБ № 99-З
-            </p>
-          </div>
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-[#364C49]" />
+          <h3 className="font-extrabold text-sm text-[#364C49]">Данные макетов</h3>
         </div>
 
-        <div className="grid grid-cols-1 gap-2.5 text-xs text-[#364C49]">
-          <div className="bg-[#F6EFE6] p-3 rounded-2xl flex items-start space-x-2.5">
-            <Lock className="w-4 h-4 text-[#364C49] shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold block text-xs">Шифрование TLS 1.3 / AES-256</span>
-              <span className="text-[11px] text-[#7C807F]">
-                Все передаваемые снимки и личные данные шифруются по банковскому стандарту.
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-[#F6EFE6] p-3 rounded-2xl flex items-start space-x-2.5">
-            <CreditCard className="w-4 h-4 text-[#364C49] shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold block text-xs">Защита платежей ЕРИП и 3D-Secure 2.0</span>
-              <span className="text-[11px] text-[#7C807F]">
-                Оплата через официальный шлюз. Номера банковских карт не сохраняются.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Purge user data button (GDPR / РБ) */}
         <div className="pt-2 border-t border-[#BCBFB7]/30">
           <button
             type="button"
@@ -487,7 +378,7 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
             className="w-full py-3 px-3 rounded-2xl bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs flex items-center justify-center space-x-2 transition-colors cursor-pointer"
           >
             <Trash2 className="w-4 h-4 text-red-600" />
-            <span>{isPurging ? 'Удаление данных...' : 'Удалить все мои загруженные фото и черновики'}</span>
+            <span>{isPurging ? 'Удаление данных...' : 'Удалить мои черновики и их фотографии'}</span>
           </button>
           {purgeMessage && (
             <div className="mt-2 p-2.5 bg-emerald-50 text-emerald-800 text-xs rounded-xl flex items-center space-x-1.5 border border-emerald-200">
@@ -517,19 +408,6 @@ export const DeliveryTracker: React.FC<DeliveryTrackerProps> = ({
           <span>+375 17 200-11-22</span>
         </a>
       </div>
-
-      {/* 7. DISCREET OPERATOR ACCESS (Optional for laboratory testers) */}
-      {onToggleOperator && (
-        <div className="text-center pt-2">
-          <button
-            type="button"
-            onClick={onToggleOperator}
-            className="text-[11px] text-[#7C807F] hover:text-[#364C49] underline cursor-pointer"
-          >
-            {isOperator ? 'Вернуться в режим покупателя' : 'Служебный вход для сотрудников лаборатории'}
-          </button>
-        </div>
-      )}
 
     </div>
   );
