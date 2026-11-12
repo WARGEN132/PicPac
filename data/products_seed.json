@@ -1,0 +1,329 @@
+[
+  {
+    "id": "prod-book-classic",
+    "slug": "photobook-classic",
+    "name": "Classic 20×20",
+    "category": "photobook",
+    "categoryName": "Фотокниги",
+    "description": "Хит продаж. Твёрдая фотообложка Soft-Touch, разворот 180° Layflat без залома. Плотные страницы на пластике не мнутся со временем. Настоящая фотопечать Fujifilm. Изготовление до 3 дней на производстве в Великом камне.",
+    "base_price": 38.99,
+    "original_price": 70.90,
+    "currency": "BYN",
+    "min_resolution_width": 2000,
+    "min_resolution_height": 2000,
+    "min_photos": 15,
+    "max_photos": 60,
+    "production_days": 3,
+    "image_url": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+    "badge": "Хит • -45%",
+    "features": [
+      "Разворот 180° Layflat без залома",
+      "Твёрдая фотообложка Soft-Touch",
+      "Плотные листы 250 г/м² на пластике",
+      "Производство в Великом камне (до 3 дней)"
+    ],
+    "variants": [
+      {
+        "id": "var-classic-20x20",
+        "name": "20 × 20 см (Квадратная, 20 стр.)",
+        "sku": "BK-CLS-2020",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": {
+          "size": "20×20 см",
+          "pages": 20,
+          "cover": "Твёрдая фотообложка Soft-Touch",
+          "paper": "Fuji Luster 250 г/м²",
+          "originalPrice": 70.90
+        }
+      },
+      {
+        "id": "var-classic-20x30",
+        "name": "20 × 30 см (Вертикальная, 24 стр.)",
+        "sku": "BK-CLS-2030",
+        "price_modifier": 16.00,
+        "is_default": 0,
+        "attributes": {
+          "size": "20×30 см",
+          "pages": 24,
+          "cover": "Твёрдая фотообложка Soft-Touch",
+          "paper": "Fuji Luster 250 г/м²",
+          "originalPrice": 95.00
+        }
+      },
+      {
+        "id": "var-classic-30x30",
+        "name": "30 × 30 см (Большой семейный альбом, 30 стр.)",
+        "sku": "BK-CLS-3030",
+        "price_modifier": 39.00,
+        "is_default": 0,
+        "attributes": {
+          "size": "30×30 см",
+          "pages": 30,
+          "cover": "Твёрдая фотообложка Premium",
+          "paper": "Fuji Silk 300 г/м²",
+          "originalPrice": 135.00
+        }
+      }
+    ]
+  },
+  {
+    "id": "prod-book-lite",
+    "slug": "photobook-lite",
+    "name": "Lite 15×20",
+    "category": "photobook",
+    "categoryName": "Фотокниги",
+    "description": "Журнальный формат в мягкой матовой обложке, до 160 полос. Лёгкая, стильная и компактная фотокнига для отпусков и семейных архивов. Изготовление до 3 дней на производстве в Великом камне.",
+    "base_price": 45.00,
+    "original_price": 60.00,
+    "currency": "BYN",
+    "min_resolution_width": 1600,
+    "min_resolution_height": 1600,
+    "min_photos": 10,
+    "max_photos": 160,
+    "production_days": 3,
+    "image_url": "https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=800&q=80",
+    "badge": "Выгодно • -25%",
+    "features": [
+      "Мягкая гибкая обложка с ламинацией",
+      "Мелованная бумага 170 г/м² до 160 полос",
+      "Удобно брать с собой",
+      "Производство в Великом камне"
+    ],
+    "variants": [
+      {
+        "id": "var-lite-15x20",
+        "name": "15 × 20 см (Компакт, 20 стр.)",
+        "sku": "BK-LIT-1520",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "size": "15×20 см", "pages": 20, "cover": "Мягкая матовая", "originalPrice": 60.00 }
+      },
+      {
+        "id": "var-lite-20x20",
+        "name": "20 × 20 см (Квадратный журнал, 32 стр.)",
+        "sku": "BK-LIT-2020",
+        "price_modifier": 10.00,
+        "is_default": 0,
+        "attributes": { "size": "20×20 см", "pages": 32, "cover": "Мягкая глянцевая", "originalPrice": 75.00 }
+      }
+    ]
+  },
+  {
+    "id": "prod-book-premium",
+    "slug": "photobook-premium",
+    "name": "Premium 21×30",
+    "category": "photobook",
+    "categoryName": "Фотокниги",
+    "description": "Бесшовный разворот Layflat 180°, премиальный переплёт из итальянской экокожи или натурального льна. Индивидуальное золотое тиснение, фотовставка, бумага Fuji Silk. Изготовление до 3 дней на производстве в Великом камне.",
+    "base_price": 72.00,
+    "original_price": 120.00,
+    "currency": "BYN",
+    "min_resolution_width": 2400,
+    "min_resolution_height": 2400,
+    "min_photos": 20,
+    "max_photos": 80,
+    "production_days": 3,
+    "image_url": "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&w=800&q=80",
+    "badge": "Премиум • -40%",
+    "features": [
+      "Итальянская экокожа или натуральный лён",
+      "Горячее тиснение золотой фольгой",
+      "Разворот 180° Layflat без стыка",
+      "Фотобумага Fuji Silk (натуральный шёлк)"
+    ],
+    "variants": [
+      {
+        "id": "var-prem-21x30",
+        "name": "21 × 30 см (Премиум переплёт, 24 стр.)",
+        "sku": "BK-PRM-2130",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "size": "21×30 см", "pages": 24, "cover": "Экокожа", "originalPrice": 120.00 }
+      },
+      {
+        "id": "var-prem-30x30",
+        "name": "30 × 30 см (Большой Deluxe гранд-альбом, 30 стр.)",
+        "sku": "BK-PRM-3030",
+        "price_modifier": 38.00,
+        "is_default": 0,
+        "attributes": { "size": "30×30 см", "pages": 30, "cover": "Премиум экокожа", "originalPrice": 165.00 }
+      }
+    ]
+  },
+  {
+    "id": "prod-photo-chemical",
+    "slug": "photo-chemical",
+    "name": "Фотопечать 10×15 (пак 24 шт.)",
+    "category": "prints",
+    "categoryName": "Фотопечать",
+    "description": "Классическая оптическая печать на японской фотобумаге Fujifilm Crystal Archive. От 0.55 BYN за снимок в пакете от 24 шт. Стойкость цвета более 100 лет. Изготовление до 2 дней на производстве в Великом камне.",
+    "base_price": 0.55,
+    "original_price": 0.90,
+    "currency": "BYN",
+    "min_resolution_width": 1200,
+    "min_resolution_height": 1800,
+    "min_photos": 1,
+    "max_photos": 500,
+    "production_days": 2,
+    "image_url": "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=800&q=80",
+    "badge": "от 0.55 BYN",
+    "features": [
+      "Химическая оптическая печать",
+      "Матовая или глянцевая бумага Fujifilm",
+      "Стойкость более 100 лет без выцветания",
+      "Удобный пак 24 шт."
+    ],
+    "variants": [
+      {
+        "id": "var-chem-10x15",
+        "name": "10 × 15 см (Пак 24 шт. — от 0.55 BYN)",
+        "sku": "PR-CHM-1015",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "size": "10×15 см", "paper": "Fuji Crystal Archive", "packMin": 24 }
+      },
+      {
+        "id": "var-chem-15x21",
+        "name": "15 × 21 см (Формат А5)",
+        "sku": "PR-CHM-1521",
+        "price_modifier": 0.65,
+        "is_default": 0,
+        "attributes": { "size": "15×21 см", "paper": "Fuji Crystal Archive" }
+      },
+      {
+        "id": "var-chem-polaroid",
+        "name": "Polaroid Retro (10 × 12 см с белым полем)",
+        "sku": "PR-CHM-POL",
+        "price_modifier": 0.35,
+        "is_default": 0,
+        "attributes": { "size": "10×12 см", "paper": "Fuji Lustre" }
+      }
+    ]
+  },
+  {
+    "id": "prod-photo-digital",
+    "slug": "photo-digital",
+    "name": "Цифровая срочная печать",
+    "category": "prints",
+    "categoryName": "Фотопечать",
+    "description": "Оперативная цифровая печать на плотной мелованной бумаге 300 г/м². Готовность от 4 часов на производстве в Великом камне.",
+    "base_price": 0.80,
+    "original_price": 1.20,
+    "currency": "BYN",
+    "min_resolution_width": 1500,
+    "min_resolution_height": 2100,
+    "min_photos": 1,
+    "max_photos": 500,
+    "production_days": 1,
+    "image_url": "https://images.unsplash.com/photo-1520690214124-2405c5217036?auto=format&fit=crop&w=800&q=80",
+    "badge": "Срочно",
+    "features": [
+      "Плотная мелованная бумага 300 г/м²",
+      "Срочная готовность от 4 часов",
+      "Форматы от 10×15 до А4"
+    ],
+    "variants": [
+      {
+        "id": "var-dig-10x15",
+        "name": "10 × 15 см (Плотная 300 г/м²)",
+        "sku": "PR-DIG-1015",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "size": "10×15 см", "paper": "300 г/м²" }
+      },
+      {
+        "id": "var-dig-21x30",
+        "name": "21 × 30 см (А4 плакат)",
+        "sku": "PR-DIG-A4",
+        "price_modifier": 2.20,
+        "is_default": 0,
+        "attributes": { "size": "21×30 см", "paper": "300 г/м²" }
+      }
+    ]
+  },
+  {
+    "id": "prod-canvas-interior",
+    "slug": "canvas-interior",
+    "name": "Холст на подрамнике",
+    "category": "canvas",
+    "categoryName": "Холсты",
+    "description": "Натуральный хлопковый холст с галерейной натяжкой на подрамник из сосны. Защитный лак и крепление в комплекте. Изготовление до 3 дней в Великом камне.",
+    "base_price": 38.00,
+    "original_price": 55.00,
+    "currency": "BYN",
+    "min_resolution_width": 2000,
+    "min_resolution_height": 2000,
+    "min_photos": 1,
+    "max_photos": 4,
+    "production_days": 3,
+    "image_url": "https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=800&q=80",
+    "badge": "Интерьер",
+    "features": [
+      "100% хлопковый фактурный холст",
+      "Подрамник из натуральной сосны",
+      "Галерейная натяжка с продолжением фото",
+      "Подвес и лакировка в комплекте"
+    ],
+    "variants": [
+      {
+        "id": "var-cnv-30x40",
+        "name": "30 × 40 см (Стандарт)",
+        "sku": "CN-3040",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "size": "30×40 см" }
+      },
+      {
+        "id": "var-cnv-40x60",
+        "name": "40 × 60 см (Популярный)",
+        "sku": "CN-4060",
+        "price_modifier": 22.00,
+        "is_default": 0,
+        "attributes": { "size": "40×60 см" }
+      }
+    ]
+  },
+  {
+    "id": "prod-magnets-set",
+    "slug": "photo-magnets",
+    "name": "Виниловые фотомагниты (сет)",
+    "category": "magnets",
+    "categoryName": "Магниты",
+    "description": "Яркие гибкие магниты на холодильник со скруглёнными углами и защитной ламинацией от влаги и выцветания. Изготовление до 2 дней на производстве в Великом камне.",
+    "base_price": 12.00,
+    "original_price": 18.00,
+    "currency": "BYN",
+    "min_resolution_width": 1000,
+    "min_resolution_height": 1000,
+    "min_photos": 4,
+    "max_photos": 16,
+    "production_days": 2,
+    "image_url": "https://images.unsplash.com/photo-1582533561751-ef6f6ab93a2e?auto=format&fit=crop&w=800&q=80",
+    "badge": "Сувенир",
+    "features": [
+      "Гибкий магнитный винил 0.7 мм",
+      "Защитная глянцевая ламинация",
+      "Скруглённые безопасные углы",
+      "Сеты от 4 до 9 фото"
+    ],
+    "variants": [
+      {
+        "id": "var-mag-4",
+        "name": "Набор 4 шт. (10 × 10 см)",
+        "sku": "MG-1010-4",
+        "price_modifier": 0.00,
+        "is_default": 1,
+        "attributes": { "count": 4, "size": "10×10 см" }
+      },
+      {
+        "id": "var-mag-9",
+        "name": "Набор 9 шт. (7 × 7 см Polaroid)",
+        "sku": "MG-0707-9",
+        "price_modifier": 6.00,
+        "is_default": 0,
+        "attributes": { "count": 9, "size": "7×7 см" }
+      }
+    ]
+  }
+]

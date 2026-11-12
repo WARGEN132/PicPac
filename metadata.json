@@ -1,0 +1,6 @@
+{
+  "name": "picPac.by — Фотопродукция со смартфона",
+  "description": "Мобильное PWA-приложение для заказа фотопродукции (фотокниги, печать, холсты, магниты, календари) со смартфона для ООО «Фотопринт».",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

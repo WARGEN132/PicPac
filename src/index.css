@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-picpac-text: #364C49;
+    --color-picpac-secondary: #7A8C88;
+    --color-picpac-accent: #DD5757;
+    --color-picpac-bg: #FFFFFF;
+    --color-picpac-bg-warm: #F6EFE6;
+    --color-picpac-border: #EDE1D5;
+    --color-picpac-lavender: #CEBCE2;
+    --color-picpac-olive: #7AA45A;
+  }
+
+  body {
+    background-color: #F6EFE6;
+    color: #364C49;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1, h2, h3, .font-comfortaa {
+    font-family: 'Comfortaa', cursive, -apple-system, sans-serif;
+  }
+}
+
+/* Craft paper card shadow (Slide 26-28) */
+.craft-shadow {
+  box-shadow: 0 8px 24px rgba(54, 76, 73, 0.06);
+}
+
+.craft-shadow-sm {
+  box-shadow: 0 4px 12px rgba(54, 76, 73, 0.05);
+}
+
+.craft-shadow-lg {
+  box-shadow: 0 16px 36px rgba(54, 76, 73, 0.09);
+}
+
+/* Seamless Layflat 180° book fold simulation */
+.layflat-spread {
+  position: relative;
+  background-color: #FFFFFF;
+  box-shadow: 0 10px 30px rgba(54, 76, 73, 0.08);
+}
+
+.layflat-spine-shadow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 18px;
+  transform: translateX(-50%);
+  background: linear-gradient(to right, rgba(54, 76, 73, 0.08) 0%, rgba(54, 76, 73, 0.01) 40%, rgba(54, 76, 73, 0.01) 60%, rgba(54, 76, 73, 0.08) 100%);
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Discount Sticker */
+.sticker-badge {
+  transform: rotate(-1.5deg);
+  box-shadow: 0 2px 6px rgba(221, 87, 87, 0.2);
+}
+
+/* Custom scrollbar hiding */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe Print Zones */
+.safe-zone-overlay {
+  border: 1px dashed rgba(221, 87, 87, 0.4);
+}
+.bleed-zone-overlay {
+  border: 1px dashed rgba(124, 128, 127, 0.35);
+}
